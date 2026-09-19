@@ -42,8 +42,8 @@ with deepgram.listen.v1.connect(
                 if message.type == "Results":
                     transcript = message.channel.alternatives[0].transcript
 
-                if message.is_final and transcript:
-                    print(transcript)
+                    if message.is_final and transcript:
+                        print(transcript)
 
         except KeyboardInterrupt:
             print("\nStopped.")
