@@ -4,15 +4,15 @@
 
 An AI voice companion for STEM learning, designed to make mathematical and scientific knowledge **orally accessible**. Instead of copying LLM-generated answers, students are walked through problems via natural conversation with an agent that speaks math like a human does.
 
-> `sqrt(x)` -> "square root of x" | `dy/dx` -> "the derivative of y with respect to x" | `[[1,2],[3,4]]` -> "a 2 by 2 matrix with top row 1 and 2, bottom row 3 and 4"
+> `sqrt(x)` -> "square root of x" | `dy/dx` -> "the derivative of y with respect to x" | `H₂O` -> "H 2 O" | `A → B` -> "A yields B" (chemistry) or "A implies B" (logic)
 
 ---
 
 ## Target
 
 - **Who**: Kids, primarily younger students (roughly 8-14)
-- **Subject**: STEM — math, science, engineering concepts
-- **Niche**: Scientific communication via speech — the agent speaks and understands math notation naturally
+- **Subject**: STEM — math, science, chemistry, engineering concepts
+- **Niche**: Scientific communication via speech — the agent speaks and understands math and chemical notation naturally
 
 ---
 
@@ -30,9 +30,9 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 ### 1. Voice STEM Agent (Core)
 - Fully voice-driven: student speaks, agent speaks back — no screen, no typing
 - Student can state a problem verbally: "what is the integral of x squared from 0 to 1?"
-- Agent interprets spoken math and responds in natural spoken math
-- Handles: arithmetic, algebra, square roots, exponents, calculus (derivatives, integrals, limits), matrices, scientific notation, units
-- Built on **Deepgram** (STT) + **Claude** (reasoning + pedagogy) + TTS
+- Agent interprets spoken math/chemistry and responds in natural spoken language
+- Handles: arithmetic, algebra, calculus, matrices, scientific notation, chemical equations, units
+- Built on **Whisper** (STT, open source) + **Claude** (reasoning + pedagogy) + **Deepgram Aura** (TTS only)
 
 ### 2. Teach-Back Mode
 - Student explains a concept to the agent
@@ -40,7 +40,7 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 - Agent can intentionally misunderstand a poorly explained concept to push the student to be more precise
 - Flags and stores weak areas per topic
 
-### 3. Mistake Mode
+### 3. Quiz Mode
 - Agent deliberately explains something incorrectly
 - Student must identify and correct the error
 - If student misses it, agent gives a hint
@@ -54,6 +54,20 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 
 ---
 
+## Tools
+
+The agent has access to the following support modes, activated by context or wake phrase:
+
+| Tool | Description |
+|---|---|
+| **Mental Health** | Detects frustration, stress, disengagement — responds with care, offers breaks |
+| **Motivation** | Streaks, encouragement, session goals, celebrates progress |
+| **Teaching** | Core Socratic walkthrough and explanation mode |
+| **Entertainment** | Fun facts, analogies, interesting angles on a topic to re-engage a disengaged student |
+| **Advising** | Broader guidance — study tips, how to approach a topic, what to learn next |
+
+---
+
 ## Emotional & Motivational Layer
 
 ### Mental Health — What it means in a voice agent
@@ -61,23 +75,40 @@ No screen means the only signal is **voice and words**. Emotional state is detec
 - What they say: "I don't get it", "this is stupid", "I give up"
 - Patterns: repeated wrong answers, very short responses, long pauses
 
-The agent never diagnoses — it adjusts tone and difficulty in response.
+The agent never diagnoses — it adjusts tone and difficulty, and redirects serious concerns to a trusted adult.
 
 ### Mood States
 | Mood | Agent Response |
 |---|---|
 | `frustrated` | Slows down, offers encouragement, simplifies |
-| `disengaged` | Switches tone, reframes the topic more interestingly |
+| `disengaged` | Switches to Entertainment tool — reframes topic interestingly |
 | `confused` | Backtracks, re-explains from a different direction |
 | `confident` | Pushes slightly harder, introduces next concept |
 
-### Motivation
-- Streak of correct answers -> agent celebrates verbally
-- First time mastering a topic -> special acknowledgement
-- Struggling too long -> agent offers a hint or suggests a break
-- Session goals: agent sets a small goal at the start ("let's get through derivatives today")
+---
 
-All feedback is spoken, never shown.
+## Dashboard
+
+| Component | Description |
+|---|---|
+| **Motivation** | Streaks, session goals, verbal encouragement moments logged |
+| **Progression** | Topics covered, concepts unlocked, sessions completed |
+| **Mastery / Understanding** | Per-topic confidence scores from Teach-Back and walkthroughs |
+| **Activity** | Time spent, attention patterns, session history |
+
+All feedback is spoken, never shown (no screen during session).
+
+---
+
+## Kid Safety Features
+
+- **Content filtering**: Agent refuses to engage with off-topic content (social media, gaming, relationships)
+- **Age-appropriate language**: Responses tuned for 8-14 year olds — no jargon, no adult themes
+- **No personal data**: Agent never asks for name, location, school, or any identifying information
+- **Safe messaging on mental health**: Follows safe messaging guidelines — never dismisses distress, always redirects to a trusted adult for serious concerns
+- **Topic boundaries**: Strictly STEM — agent gracefully redirects non-STEM questions back to study
+- **No internet access**: Agent cannot browse the web or reference external content
+- **Distraction-free hardware**: Dedicated ESP32 device prevents access to games, social media, messaging
 
 ---
 
@@ -86,39 +117,101 @@ All feedback is spoken, never shown.
 The agent talks like a slightly older student, not a teacher:
 - Casual language: "okay so here's the thing about integrals..."
 - Gets "excited" about topics
-- Can be wrong sometimes (Mistake Mode)
+- Can be wrong sometimes (Quiz Mode)
 - Name and personality TBD — critical for engagement with kids
+
+---
+
+## Voice Pipeline
+
+### Architecture
+```
+Mic input
+  -> Whisper STT (open source, local)
+    -> speech_normalizer.py      (spoken text -> Unicode math/chemistry)
+      -> mood_tracker.py         (classify student mood)
+        -> agent.py              (Claude — Socratic / Teach-Back / Quiz)
+          -> motivation_engine.py  (streaks, encouragement)
+            -> math_renderer.py    (Unicode math/chemistry -> speakable English)
+              -> Deepgram Aura TTS  (natural voice output)
+                -> Speaker
+```
+
+### One-line pipeline with Pipecat (open source)
+Rather than manually chaining modules, use **Pipecat** (open source by Daily.co) which handles async audio streaming, interruptions, and turn-taking:
+
+```python
+pipeline = Pipeline([
+    WhisperSTTService(),         # open source STT — local, free, no data sent out
+    SpeechNormalizerService(),   # Chai's module
+    MoodTrackerService(),        # Sam's module
+    ClaudeAgentService(),        # Andy's module
+    MathRendererService(),       # Kyle's module
+    DeepgramAuraTTSService(),    # TTS — Deepgram used only for voice output
+])
+```
+
+### Why Whisper for STT
+- Fully open source (MIT license), runs locally
+- No per-minute cost, no student audio sent to third party
+- Handles accented speech and kid voices well
+- `faster-whisper` (CTranslate2) runs near-realtime on CPU
+
+### Why Deepgram Aura for TTS only
+- Natural, child-friendly voice
+- Low latency REST call
+- Already integrated — one key
 
 ---
 
 ## Tech Stack
 
-| Layer | Tool |
-|---|---|
-| Speech-to-Text | Deepgram |
-| LLM / Reasoning | Claude API (claude-sonnet-4-6) |
-| Text-to-Speech | Deepgram Aura or ElevenLabs |
-| Math parsing | Custom notation-to-speech layer |
-| Phone app (v1) | React Native or Flutter |
-| Hardware target (v2) | ESP32 (same Deepgram REST call in C++) |
+| Layer | Tool | Notes |
+|---|---|---|
+| Speech-to-Text | Whisper / faster-whisper | Open source, local |
+| LLM / Reasoning | Claude API (claude-sonnet-4-6) | Pedagogy + persona |
+| Text-to-Speech | Deepgram Aura | Natural voice, REST, TTS only |
+| Math parsing | `speech_normalizer.py` + `math_renderer.py` | Custom, bidirectional |
+| Chemistry parsing | `chem_normalizer.py` (planned) | See below |
+| Pipeline framework | Pipecat (open source) | Replaces manual chaining |
+| Phone app (v1) | React Native or Flutter | Mic + speaker only |
+| Hardware target (v2) | ESP32 | Same Deepgram REST in C++ |
 
 ---
 
-## Math-to-Speech Layer (Key Differentiator)
+## Math-to-Speech Layer
 
-Since there is no screen, all math must flow through speech in both directions:
+### Arrow `→` — Context-Aware Pronunciation
 
-- **STT -> structured math**: Deepgram transcribes student speech; a normalizer maps spoken phrases into structured math for Claude to reason over
-- **Structured math -> TTS**: Claude's response is passed through a math-to-speech renderer before TTS, so the agent never says "sqrt x" or "x caret 2" aloud
+| Context | Expression | Spoken |
+|---|---|---|
+| Chemistry | `H₂ + O₂ → H₂O` | "H 2 plus O 2 yields H 2 O" |
+| Equilibrium | `CaCO₃ ⇌ CaO + CO₂` | "calcium carbonate is in equilibrium with calcium oxide plus C O 2" |
+| Logic | `A → B` | "A implies B" |
+| Limits | `x → 0` | "x approaches 0" |
+| Functions | `f: x → x²` | "f maps x to x squared" |
+
+Domain is detected from context (surrounding symbols, keywords) before the rule is applied.
+
+### Chemical Equations Support (`chem_normalizer.py`)
+
+| Expression | Spoken |
+|---|---|
+| `H₂O` | "H 2 O" |
+| `CO₂` | "C O 2" |
+| `H₂SO₄` | "H 2 S O 4" |
+| `Ca²⁺` | "calcium 2 plus ion" |
+| `2H₂ + O₂ → 2H₂O` | "2 H 2 plus O 2 yields 2 H 2 O" |
+| Subscripts `₂ ₃ ₄` | spoken as digits after element symbol |
+| Coefficients | spoken as numbers before compound |
+
+### Math expression examples
 
 | Expression | Spoken form |
 |---|---|
 | `x^2` | "x squared" |
-| `x^n` | "x to the power of n" |
 | `sqrt(x)` | "square root of x" |
-| `cbrt(x)` | "cube root of x" |
 | `dy/dx` | "the derivative of y with respect to x" |
-| `d^2y/dx^2` | "the second derivative of y with respect to x" |
 | `int_a^b f(x) dx` | "the integral from a to b of f of x" |
 | `lim_{x->0}` | "the limit as x approaches 0" |
 | `[[1,2],[3,4]]` | "a 2 by 2 matrix, top row 1 and 2, bottom row 3 and 4" |
@@ -129,40 +222,28 @@ Since there is no screen, all math must flow through speech in both directions:
 ## Codebase Structure
 
 ```
-voice_loop.py          # mic input, Deepgram STT, TTS playback
-speech_normalizer.py   # spoken text -> math-normalized text
-math_renderer.py       # math expressions -> speakable English
-agent.py               # Claude calls, Socratic mode, Teach-Back, Mistake Mode
-mood_tracker.py        # classifies student mood from transcript
-motivation_engine.py   # streaks, encouragement, session goals
-persona.py             # wraps Claude responses in peer personality
-main.py                # integration: chains all modules together
-```
-
-### Full pipeline
-
-```
-voice_loop.listen()
-  -> speech_normalizer.normalize()
-    -> mood_tracker.classify()
-      -> agent.ask()  [with mood context + persona]
-        -> motivation_engine.check()
-          -> math_renderer.render()
-            -> voice_loop.speak()
+transcribe.py          # mic -> Whisper STT -> transcript (Sam)
+speech_normalizer.py   # spoken text -> Unicode math/chemistry (Chai)
+symbols.json           # bidirectional symbol lexicon, 99 entries
+math_renderer.py       # Unicode math -> speakable English (Kyle)
+chem_normalizer.py     # chemical formula/equation -> speakable (Chai, planned)
+agent.py               # Claude calls, Socratic/Teach-Back/Quiz mode (Andy)
+mood_tracker.py        # mood classification from transcript (Sam)
+motivation_engine.py   # streaks, session goals, encouragement (Sam)
+persona.py             # peer personality wrapper (Andy)
+main.py                # Pipecat pipeline — chains all modules
 ```
 
 ---
 
-## Team Split
+## Team Branches
 
-| Branch | Person | Owns | Can test without audio |
-|---|---|---|---|
-| `Chai` | Chai | `voice_loop.py` | No — this is the audio layer |
-| `Kyle` | Kyle | `math_renderer.py`, `speech_normalizer.py` | Yes — pure string in, string out |
-| `Sam` | Sam | `mood_tracker.py`, `motivation_engine.py` | Yes — feed transcripts, assert mood + response |
-| `Andy` | Andy | `agent.py`, `persona.py` | Yes — type input, print Claude response |
-
-Integration: one `main.py` PR to main once all modules work independently.
+| Branch | Person | Owns |
+|---|---|---|
+| `chai-normalizer` | Chai | `speech_normalizer.py`, `chem_normalizer.py` |
+| `kyle-renderer` | Kyle | `math_renderer.py`, `test_math_renderer.py` |
+| `andy-agent` | Andy | `agent.py`, `persona.py` |
+| `sam-voice` | Sam | `transcribe.py`, `mood_tracker.py`, `motivation_engine.py` |
 
 ---
 
@@ -170,29 +251,33 @@ Integration: one `main.py` PR to main once all modules work independently.
 
 ### Phase 1 — MVP (Hackathon)
 - [x] Deepgram API test
-- [ ] `voice_loop.py` — mic -> STT -> TTS
-- [ ] `speech_normalizer.py` — spoken math -> structured math
-- [ ] `math_renderer.py` — structured math -> speakable English
-- [ ] `agent.py` — Socratic walkthrough via Claude
-- [ ] `main.py` — integrate full pipeline
+- [x] `speech_normalizer.py` — spoken math -> Unicode (21 tests passing)
+- [x] `symbols.json` — 99-entry bidirectional lexicon
+- [x] `math_renderer.py` — Unicode -> speakable English (8 tests passing)
+- [x] `transcribe.py` — live mic -> STT -> transcript (one-line display)
+- [ ] `agent.py` — Claude Socratic walkthrough
+- [ ] TTS — Deepgram Aura REST call, play audio through speaker
+- [ ] `main.py` — Pipecat pipeline connecting everything
 
 ### Phase 2 — Emotional Layer
 - [ ] `mood_tracker.py` — classify mood from transcript
 - [ ] `motivation_engine.py` — streaks, encouragement, session goals
 - [ ] `persona.py` — peer personality wrapper
+- [ ] Quiz Mode
 
-### Phase 3 — Agent Modes
-- [ ] Teach-Back mode
-- [ ] Mistake Mode
-- [ ] Topic/mastery tracking per session
+### Phase 3 — Chemistry + Safety
+- [ ] `chem_normalizer.py` — chemical formulas and equations
+- [ ] Arrow `→` context detection (chemistry / logic / limits / functions)
+- [ ] Kid safety content filter
+- [ ] Safe messaging on mental health responses
 
 ### Phase 4 — Hardware
 - [ ] Port voice loop to ESP32 (C++ HTTP client to Deepgram REST)
-- [ ] Offline fallback for basic interactions
+- [ ] Whisper offline fallback on device
 
 ---
 
 ## Open Questions
 - Do we need user accounts / persistence for the hackathon, or is session-only fine?
 - What is the peer persona's name and character?
-- How does the student switch modes — wake phrase ("let's do teach-back") or agent infers from context?
+- How does the student switch modes — wake phrase ("let's do quiz mode") or agent infers from context?
