@@ -1,49 +1,77 @@
+"""
+transcribe.py — Sam's module
+
+Live microphone -> Deepgram WebSocket -> printed transcript.
+Uses raw WebSocket (no SDK) so it works regardless of SDK version.
+"""
+
+import asyncio
+import json
 import os
 import sounddevice as sd
+import websockets
+from dotenv import load_dotenv
 
-from deepgram import DeepgramClient
-
+load_dotenv()
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
-
-deepgram = DeepgramClient(
-    api_key=os.environ["DEEPGRAM_API_KEY"]
+DEEPGRAM_URL = (
+    "wss://api.deepgram.com/v1/listen"
+    "?model=nova-2&language=en-US&encoding=linear16"
+    f"&sample_rate={SAMPLE_RATE}&channels={CHANNELS}&interim_results=true"
 )
 
-print("Connecting to Deepgram...")
 
-with deepgram.listen.v1.connect(
-    model="nova-3",
-    language="en-US",
-    encoding="linear16",
-    sample_rate=SAMPLE_RATE,
-    channels=CHANNELS,
-    interim_results=True,
-) as connection:
+async def transcribe():
+    api_key = os.getenv("DEEPGRAM_API_KEY")
+    headers = {"Authorization": f"Token {api_key}"}
 
-    print("Listening... speak into your microphone.")
-    print("Press Control+C to stop.")
+    async with websockets.connect(DEEPGRAM_URL, additional_headers=headers) as ws:
+        print("Connected to Deepgram.")
+        print("Listening... speak into your microphone. Press Ctrl+C to stop.\n")
 
-    def audio_callback(indata, frames, time, status):
-        if status:
-            print(status)
+        loop = asyncio.get_event_loop()
+        queue = asyncio.Queue()
 
-        connection.send_media(indata.tobytes())
+        def audio_callback(indata, frames, time, status):
+            if status:
+                print("Audio status:", status)
+            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
 
-    with sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        dtype="int16",
-        callback=audio_callback,
-    ):
-        try:
-            for message in connection:
-                if message.type == "Results":
-                    transcript = message.channel.alternatives[0].transcript
+        async def sender():
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype="int16",
+                callback=audio_callback,
+                blocksize=4000,
+            ):
+                while True:
+                    chunk = await queue.get()
+                    await ws.send(chunk)
 
-                if message.is_final and transcript:
-                    print(transcript)
+        async def receiver():
+            async for message in ws:
+                data = json.loads(message)
+                if data.get("type") == "Results":
+                    transcript = (
+                        data.get("channel", {})
+                        .get("alternatives", [{}])[0]
+                        .get("transcript", "")
+                    )
+                    is_final = data.get("is_final", False)
+                    if transcript:
+                        if is_final:
+                            print(f"\r> {transcript}          ")
+                        else:
+                            print(f"\r  {transcript}          ", end="", flush=True)
 
-        except KeyboardInterrupt:
-            print("\nStopped.")
+        await asyncio.gather(sender(), receiver())
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(transcribe())
+    except KeyboardInterrupt:
+        print("\nStopped.")
