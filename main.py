@@ -8,9 +8,10 @@ Pipeline:
 import os
 import warnings
 import logging
-import numpy as np
+import tempfile
+import wave
+import subprocess
 import requests
-import sounddevice as sd
 from dotenv import load_dotenv
 
 # Suppress model loading noise
@@ -57,9 +58,15 @@ def speak(text: str):
             timeout=10,
         )
         response.raise_for_status()
-        audio = np.frombuffer(response.content, dtype=np.int16).astype(np.float32) / 32768.0
-        sd.play(audio, samplerate=24000)
-        sd.wait()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp = f.name
+            with wave.open(tmp, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(response.content)
+        subprocess.run(["afplay", tmp], check=True)
+        os.unlink(tmp)
     except Exception as e:
         print(f"  [TTS error: {e}]")
 
