@@ -38,11 +38,13 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 - Student explains a concept to the agent
 - Agent listens, then asks concept-check questions
 - Agent can intentionally misunderstand a poorly explained concept to push the student to be more precise
-- Tracks strong vs. weak areas over time
+- Flags and stores weak areas per topic
 
 ### 3. Mistake Mode
 - Agent deliberately explains something incorrectly
 - Student must identify and correct the error
+- If student misses it, agent gives a hint
+- If student catches it, agent confirms and explains why
 - Builds critical thinking and deeper understanding
 
 ### 4. Study / Problem Walkthrough Mode
@@ -52,14 +54,40 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 
 ---
 
-## Dashboard
+## Emotional & Motivational Layer
 
-| Component | Description |
+### Mental Health — What it means in a voice agent
+No screen means the only signal is **voice and words**. Emotional state is detected from:
+- What they say: "I don't get it", "this is stupid", "I give up"
+- Patterns: repeated wrong answers, very short responses, long pauses
+
+The agent never diagnoses — it adjusts tone and difficulty in response.
+
+### Mood States
+| Mood | Agent Response |
 |---|---|
-| **Motivation** | Streaks, encouragement, session goals |
-| **Progression** | Topics covered, skills unlocked |
-| **Mastery / Understanding** | Per-topic confidence scores from Teach-Back and walkthroughs |
-| **Activity** | Time spent, attention span %, session history |
+| `frustrated` | Slows down, offers encouragement, simplifies |
+| `disengaged` | Switches tone, reframes the topic more interestingly |
+| `confused` | Backtracks, re-explains from a different direction |
+| `confident` | Pushes slightly harder, introduces next concept |
+
+### Motivation
+- Streak of correct answers -> agent celebrates verbally
+- First time mastering a topic -> special acknowledgement
+- Struggling too long -> agent offers a hint or suggests a break
+- Session goals: agent sets a small goal at the start ("let's get through derivatives today")
+
+All feedback is spoken, never shown.
+
+---
+
+## Peer Persona
+
+The agent talks like a slightly older student, not a teacher:
+- Casual language: "okay so here's the thing about integrals..."
+- Gets "excited" about topics
+- Can be wrong sometimes (Mistake Mode)
+- Name and personality TBD — critical for engagement with kids
 
 ---
 
@@ -67,23 +95,21 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 
 | Layer | Tool |
 |---|---|
-| Speech-to-Text | Deepgram (Codex $50 credit) |
+| Speech-to-Text | Deepgram |
 | LLM / Reasoning | Claude API (claude-sonnet-4-6) |
 | Text-to-Speech | Deepgram Aura or ElevenLabs |
 | Math parsing | Custom notation-to-speech layer |
 | Phone app (v1) | React Native or Flutter |
-| Hardware target (v2) | ESP32 |
+| Hardware target (v2) | ESP32 (same Deepgram REST call in C++) |
 
 ---
 
 ## Math-to-Speech Layer (Key Differentiator)
 
-This is the core technical challenge. Since there is no screen, all math must flow through speech in both directions:
+Since there is no screen, all math must flow through speech in both directions:
 
-- **STT -> structured math**: Deepgram transcribes student speech; a normalizer maps spoken phrases ("square root of x", "x to the power of 2") into structured math representations for Claude to reason over
-- **Structured math -> TTS**: Claude's response is passed through a math-to-speech renderer before being sent to TTS, so the agent never says "sqrt x" or "x caret 2" aloud
-
-Examples to handle:
+- **STT -> structured math**: Deepgram transcribes student speech; a normalizer maps spoken phrases into structured math for Claude to reason over
+- **Structured math -> TTS**: Claude's response is passed through a math-to-speech renderer before TTS, so the agent never says "sqrt x" or "x caret 2" aloud
 
 | Expression | Spoken form |
 |---|---|
@@ -100,32 +126,73 @@ Examples to handle:
 
 ---
 
+## Codebase Structure
+
+```
+voice_loop.py          # mic input, Deepgram STT, TTS playback
+speech_normalizer.py   # spoken text -> math-normalized text
+math_renderer.py       # math expressions -> speakable English
+agent.py               # Claude calls, Socratic mode, Teach-Back, Mistake Mode
+mood_tracker.py        # classifies student mood from transcript
+motivation_engine.py   # streaks, encouragement, session goals
+persona.py             # wraps Claude responses in peer personality
+main.py                # integration: chains all modules together
+```
+
+### Full pipeline
+
+```
+voice_loop.listen()
+  -> speech_normalizer.normalize()
+    -> mood_tracker.classify()
+      -> agent.ask()  [with mood context + persona]
+        -> motivation_engine.check()
+          -> math_renderer.render()
+            -> voice_loop.speak()
+```
+
+---
+
+## Team Split
+
+| Branch | Person | Owns | Can test without audio |
+|---|---|---|---|
+| `Chai` | Chai | `voice_loop.py` | No — this is the audio layer |
+| `Kyle` | Kyle | `math_renderer.py`, `speech_normalizer.py` | Yes — pure string in, string out |
+| `Sam` | Sam | `mood_tracker.py`, `motivation_engine.py` | Yes — feed transcripts, assert mood + response |
+| `Andy` | Andy | `agent.py`, `persona.py` | Yes — type input, print Claude response |
+
+Integration: one `main.py` PR to main once all modules work independently.
+
+---
+
 ## Build Phases
 
 ### Phase 1 — MVP (Hackathon)
-- [ ] Math-to-speech renderer (structured math -> natural English for TTS)
-- [ ] Speech-to-math normalizer (spoken phrases -> structured math for Claude)
-- [ ] Voice loop: Deepgram STT -> normalizer -> Claude -> math renderer -> TTS
-- [ ] Basic problem walkthrough mode (Socratic, voice only)
-- [ ] Minimal phone app: just a mic button, no display of content
+- [x] Deepgram API test
+- [ ] `voice_loop.py` — mic -> STT -> TTS
+- [ ] `speech_normalizer.py` — spoken math -> structured math
+- [ ] `math_renderer.py` — structured math -> speakable English
+- [ ] `agent.py` — Socratic walkthrough via Claude
+- [ ] `main.py` — integrate full pipeline
 
-### Phase 2 — Core Modes
-- [ ] Teach-Back mode with concept-check questions
+### Phase 2 — Emotional Layer
+- [ ] `mood_tracker.py` — classify mood from transcript
+- [ ] `motivation_engine.py` — streaks, encouragement, session goals
+- [ ] `persona.py` — peer personality wrapper
+
+### Phase 3 — Agent Modes
+- [ ] Teach-Back mode
 - [ ] Mistake Mode
-- [ ] Mastery tracking per topic
-
-### Phase 3 — Dashboard + Polish
-- [ ] Student dashboard (progression, mastery, activity)
-- [ ] Social/peer persona tuning
-- [ ] Attention span tracking
+- [ ] Topic/mastery tracking per session
 
 ### Phase 4 — Hardware
-- [ ] Port to ESP32
-- [ ] Offline-capable fallback for basic interactions
+- [ ] Port voice loop to ESP32 (C++ HTTP client to Deepgram REST)
+- [ ] Offline fallback for basic interactions
 
 ---
 
 ## Open Questions
 - Do we need user accounts / persistence for the hackathon, or is session-only fine?
-- What is the peer persona's name/character? (Affects engagement for kids)
-- How does a student signal which mode they want (walkthrough vs. teach-back vs. mistake mode) — via a wake phrase, or does the agent infer from context?
+- What is the peer persona's name and character?
+- How does the student switch modes — wake phrase ("let's do teach-back") or agent infers from context?
