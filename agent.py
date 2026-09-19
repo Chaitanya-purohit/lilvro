@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RESPONSES_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = "gpt-5-codex"
+RESPONSES_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL = "openrouter/free"
 
 _BASE_SYSTEM = """
 You are a friendly STEM study partner for children ages 8 to 14.
@@ -63,24 +63,15 @@ def _build_system(mode: str, mood: str) -> str:
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
-    """Extract assistant text from an OpenAI Responses API payload."""
-    if isinstance(payload.get("output_text"), str):
-        text = payload["output_text"].strip()
+    """Extract assistant text from an OpenRouter chat completions payload."""
+    try:
+        msg = payload["choices"][0]["message"]
+        text = (msg.get("content") or "").strip()
         if text:
             return text
-
-    parts: list[str] = []
-    for item in payload.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "output_text" and content.get("text"):
-                parts.append(content["text"])
-
-    text = "\n".join(parts).strip()
-    if not text:
-        raise AgentError("Codex returned no text.")
-    return text
+    except (KeyError, IndexError):
+        pass
+    raise AgentError("OpenRouter returned no text.")
 
 
 def respond(
@@ -109,15 +100,15 @@ def respond(
     if not normalized_text:
         raise ValueError("normalized_text cannot be empty")
 
-    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    api_key = api_key or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise AgentError("OPENAI_API_KEY is not set.")
+        raise AgentError("OPENROUTER_API_KEY is not set.")
 
     history = list(history or [])
     history.append({"role": "user", "content": normalized_text})
 
-    # Build input array for Responses API multi-turn
-    input_messages = [
+    # Prepend system message to conversation history
+    messages = [{"role": "system", "content": _build_system(mode, mood)}] + [
         {"role": msg["role"], "content": msg["content"]}
         for msg in history
     ]
@@ -130,9 +121,8 @@ def respond(
         },
         json={
             "model": model or os.getenv("CODEX_MODEL", DEFAULT_MODEL),
-            "instructions": _build_system(mode, mood),
-            "input": input_messages,
-            "max_output_tokens": 150,
+            "messages": messages,
+            "max_tokens": 500,
         },
         timeout=timeout,
     )
@@ -144,7 +134,7 @@ def respond(
             detail = response.json().get("error", {}).get("message")
         except (ValueError, AttributeError):
             detail = None
-        raise AgentError(detail or f"Codex request failed ({response.status_code}).") from exc
+        raise AgentError(detail or f"OpenRouter request failed ({response.status_code}).") from exc
 
     reply = _extract_output_text(response.json())
     history.append({"role": "assistant", "content": reply})
