@@ -308,8 +308,10 @@ tools.py               # Fast local tool router + overlays (Andy)
 modes.py               # Teach-back + mistake + walkthrough engines (Andy)
 persona.py             # Peer personality + local fallbacks (Andy)
 mastery.py             # Per-topic mastery scores (Andy)
+voice_ux.py            # Barge-in, repeat, bookmarks, STT profiles, hardware cues (Andy)
 agent.py               # AgentRuntime.turn orchestrator (Andy)
 test_tools_modes.py    # Cohesion + router/mode unit tests (Andy)
+test_voice_ux.py       # Voice conversation UX tests (Andy)
 mood_tracker.py        # mood classification from transcript (Sam)
 motivation_engine.py   # streaks, session goals, encouragement (Sam)
 main.py                # Pipecat pipeline — chains all modules
@@ -324,7 +326,7 @@ main.py                # Pipecat pipeline — chains all modules
 |---|---|---|
 | `chai-normalizer` | Chai | `speech_normalizer.py`, `chem_normalizer.py` |
 | `kyle-renderer` | Kyle | `math_renderer.py`, `test_math_renderer.py` |
-| `andy-agent` | Andy | `contracts.py`, `agent.py`, `tools.py`, `modes.py`, `persona.py`, `mastery.py` |
+| `andy-agent` | Andy | `contracts.py`, `agent.py`, `tools.py`, `modes.py`, `persona.py`, `mastery.py`, `voice_ux.py` |
 | `sam-voice` | Sam | `transcribe.py`, `mood_tracker.py`, `motivation_engine.py` |
 
 ---
@@ -337,6 +339,7 @@ main.py                # Pipecat pipeline — chains all modules
 - [x] `symbols.json` — 99-entry bidirectional lexicon
 - [x] `math_renderer.py` — Unicode -> speakable English (8 tests passing)
 - [x] `transcribe.py` — live mic -> STT -> transcript (one-line display)
+- [x] `voice_ux.py` — barge-in, repeat/rephrase, pause, bookmarks, STT profiles, personas, fillers, hardware cues
 - [x] `contracts.py` — shared Tool/Mode/Phase turn contracts
 - [x] `tools.py` — mental_health / motivation / teaching / advising / entertainment + soft adjust
 - [x] `modes.py` — Teach-Back + Mistake + walkthrough phase engines

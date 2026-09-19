@@ -33,6 +33,18 @@ from tools import (
     collect_signals,
     route_turn,
 )
+from voice_ux import (
+    HardwareCue,
+    TranscriptEvent,
+    VoiceIntent,
+    VoiceUxAction,
+    VoiceUxState,
+    begin_turn_cues,
+    enrich_bilingual,
+    handle_transcript_confidence,
+    handle_voice_ux,
+    hardware_payload,
+)
 
 load_dotenv()
 
@@ -62,6 +74,10 @@ class AgentReply:
     mastery: float
     session: dict[str, object]
     local_only: bool = False
+    voice_intent: str = VoiceIntent.NONE.value
+    stop_tts: bool = False
+    thinking_filler: str | None = None
+    hardware: dict[str, object] | None = None
 
 
 @dataclass
@@ -71,6 +87,7 @@ class PlannedTurn:
     signals_summary: str
     frustration: bool = False
     engagement: bool = False
+    voice_action: VoiceUxAction | None = None
 
 
 @dataclass
@@ -81,6 +98,7 @@ class AgentRuntime:
     teachback: TeachbackState
     mistake: MistakeState
     mastery: MasteryBook = field(default_factory=MasteryBook)
+    voice: VoiceUxState = field(default_factory=VoiceUxState)
     history: deque[dict[str, str]] = field(
         default_factory=lambda: deque(maxlen=HISTORY_TURNS * 2)
     )
@@ -91,13 +109,25 @@ class AgentRuntime:
 
     def remember(self, role: str, text: str) -> None:
         self.history.append({"role": role, "content": text})
+        if role == "assistant":
+            self.voice.remember_agent(text)
+        elif role == "user":
+            self.voice.remember_user(text)
 
     def snapshot(self) -> dict[str, object]:
         data = self.session.snapshot()
         data["mastery"] = self.mastery.snapshot()
         data["teachback_active"] = self.teachback.active
         data["mistake_active"] = self.mistake.active
+        data["voice_ux"] = self.voice.snapshot()
         return data
+
+    def ingest_transcript(
+        self, text: str, *, confidence: float = 1.0, is_final: bool = True
+    ) -> VoiceUxAction | None:
+        """STT confidence gate — call before turn() when confidence is known."""
+        event = TranscriptEvent(text=text, confidence=confidence, is_final=is_final)
+        return handle_transcript_confidence(self.voice, event)
 
     def plan(self, normalized_text: str) -> PlannedTurn:
         planned, _ = plan_turn(normalized_text, self)
@@ -108,17 +138,80 @@ class AgentRuntime:
         normalized_text: str,
         *,
         plan_only: bool = False,
+        confidence: float | None = None,
         api_key: str | None = None,
         model: str | None = None,
         timeout: float = 18.0,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> AgentReply | PlannedTurn:
         """One cohesive entrypoint for the voice pipeline."""
+        normalized_text = normalized_text.strip()
+        if not normalized_text:
+            raise ValueError("normalized_text cannot be empty")
+
+        # Confidence-aware re-ask (when STT provides a score).
+        if confidence is not None:
+            reask = self.ingest_transcript(
+                normalized_text, confidence=confidence, is_final=True
+            )
+            if reask is not None:
+                if plan_only:
+                    return _ux_planned(self, reask)
+                text = _polish_speech(reask.speak or "")
+                self.remember("user", normalized_text)
+                self.remember("assistant", text)
+                return AgentReply(
+                    text=text,
+                    tool=Tool.TEACHING,
+                    support_tool=None,
+                    mode=self.session.mode,
+                    reason="stt_uncertain",
+                    adjust=True,
+                    phase="redirect",
+                    topic=self.session.topic,
+                    mastery=self.mastery.get(self.session.topic),
+                    session=self.snapshot(),
+                    local_only=True,
+                    voice_intent=reask.intent.value,
+                    stop_tts=False,
+                    hardware=hardware_payload(reask.hardware)
+                    if reask.hardware
+                    else None,
+                )
+
+        # Conversation UX (barge-in, pause, repeat, bookmarks, persona, …)
+        ux = handle_voice_ux(normalized_text, self.voice, topic=self.session.topic)
+        if ux.handled:
+            if plan_only:
+                return _ux_planned(self, ux)
+            text = _polish_speech(ux.speak or "")
+            self.remember("user", normalized_text)
+            if text:
+                self.remember("assistant", text)
+            return AgentReply(
+                text=text,
+                tool=Tool.TEACHING,
+                support_tool=None,
+                mode=self.session.mode,
+                reason=f"voice_ux:{ux.intent.value}",
+                adjust=False,
+                phase="idle",
+                topic=self.session.topic,
+                mastery=self.mastery.get(self.session.topic),
+                session=self.snapshot(),
+                local_only=True,
+                voice_intent=ux.intent.value,
+                stop_tts=ux.stop_tts,
+                hardware=hardware_payload(ux.hardware) if ux.hardware else None,
+            )
+
         planned = self.plan(normalized_text)
         if plan_only:
             _update_mastery(self, planned)
             return planned
-        return respond(
+
+        cues = begin_turn_cues(self.voice)
+        reply = respond(
             normalized_text,
             runtime=self,
             planned=planned,
@@ -127,6 +220,9 @@ class AgentRuntime:
             timeout=timeout,
             max_output_tokens=max_output_tokens,
         )
+        reply.thinking_filler = cues["filler"]
+        reply.hardware = cues["hardware"]
+        return reply
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
@@ -180,6 +276,10 @@ def _make_reply(
     runtime: AgentRuntime,
     mastery_score: float,
     local_only: bool,
+    voice_intent: str = VoiceIntent.NONE.value,
+    stop_tts: bool = False,
+    thinking_filler: str | None = None,
+    hardware: dict[str, object] | None = None,
 ) -> AgentReply:
     decision = planned.decision
     topic = decision.topic or runtime.session.topic
@@ -195,6 +295,28 @@ def _make_reply(
         mastery=mastery_score,
         session=runtime.snapshot(),
         local_only=local_only,
+        voice_intent=voice_intent,
+        stop_tts=stop_tts,
+        thinking_filler=thinking_filler,
+        hardware=hardware,
+    )
+
+
+def _ux_planned(runtime: AgentRuntime, ux: VoiceUxAction) -> PlannedTurn:
+    """Build a non-mutating planned turn for UX-only dry runs."""
+    from contracts import ModeGuidance, Phase
+
+    return PlannedTurn(
+        decision=TurnDecision(
+            primary_tool=Tool.TEACHING,
+            support_tool=None,
+            mode=runtime.session.mode,
+            reason=f"voice_ux:{ux.intent.value}",
+            topic=runtime.session.topic,
+        ),
+        guidance=ModeGuidance(runtime.session.mode, Phase.IDLE, ""),
+        signals_summary="voice_ux",
+        voice_action=ux,
     )
 
 
@@ -311,6 +433,7 @@ def respond(
     local = local_fallback(decision.reason)
     if local is not None:
         text = _polish_speech(local)
+        text = enrich_bilingual(text, runtime.voice.stt.language)
         runtime.remember("user", normalized_text)
         runtime.remember("assistant", text)
         return _make_reply(
@@ -319,6 +442,7 @@ def respond(
             runtime=runtime,
             mastery_score=mastery_score,
             local_only=True,
+            hardware=hardware_payload(HardwareCue.SPEAKING),
         )
 
     instructions = build_instructions(
@@ -327,6 +451,7 @@ def respond(
         extra=[
             planned.guidance.prompt_addendum,
             flavor_for_tool(decision.primary_tool),
+            runtime.voice.persona_flavor(),
             runtime.mastery.coaching_line(decision.topic or runtime.session.topic),
         ],
         session=runtime.session,
@@ -354,7 +479,7 @@ def respond(
             max_output_tokens=tokens,
             timeout=timeout,
         )
-        text = _polish_speech(raw)
+        text = enrich_bilingual(_polish_speech(raw), runtime.voice.stt.language)
         local_only = False
     except AgentError:
         text = _polish_speech(local_fallback("network_error") or "Let's try that again.")
@@ -368,12 +493,15 @@ def respond(
         runtime=runtime,
         mastery_score=mastery_score,
         local_only=local_only,
+        thinking_filler=begin_turn_cues(runtime.voice)["filler"],
+        hardware=hardware_payload(HardwareCue.SPEAKING),
     )
 
 
 def main() -> None:
     runtime = AgentRuntime.fresh()
     print("lilvro andy-agent ready.")
+    print("Voice UX: pause, repeat slower, another way, bookmark, personas, whisper mic")
     print("Modes: walkthrough | teachback | mistake")
     print("Tools: teaching | motivation | advising | mental_health | entertainment")
     print("Type 'quit' to exit. Prefix with 'plan:' to dry-run routing only.\n")
