@@ -1,49 +1,35 @@
-import os
-import sounddevice as sd
+"""
+transcribe.py — Sam's module
 
-from deepgram import DeepgramClient
+Live mic -> RealtimeSTT (faster-whisper, open source) -> clean one-line transcript.
+No interim partials — fires only on complete utterances detected by VAD (silero).
+
+Install: pip install RealtimeSTT
+"""
+
+from RealtimeSTT import AudioToTextRecorder
 
 
-SAMPLE_RATE = 16000
-CHANNELS = 1
+def on_transcript(text: str):
+    print(f"\r> {text}          ")
 
-deepgram = DeepgramClient(
-    api_key=os.environ["DEEPGRAM_API_KEY"]
-)
 
-print("Connecting to Deepgram...")
+if __name__ == "__main__":
+    print("Loading Whisper model (first run downloads ~150MB)...")
 
-with deepgram.listen.v1.connect(
-    model="nova-3",
-    language="en-US",
-    encoding="linear16",
-    sample_rate=SAMPLE_RATE,
-    channels=CHANNELS,
-    interim_results=True,
-) as connection:
+    recorder = AudioToTextRecorder(
+        model="tiny.en",
+        language="en",
+        silero_sensitivity=0.4,
+        post_speech_silence_duration=1.0,
+        on_realtime_transcription_stabilized=lambda t: print(f"\r  {t}          ", end="", flush=True),
+    )
 
-    print("Listening... speak into your microphone.")
-    print("Press Control+C to stop.")
+    print("Listening... speak into your microphone. Press Ctrl+C to stop.\n")
 
-    def audio_callback(indata, frames, time, status):
-        if status:
-            print(status)
-
-        connection.send_media(indata.tobytes())
-
-    with sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        dtype="int16",
-        callback=audio_callback,
-    ):
-        try:
-            for message in connection:
-                if message.type == "Results":
-                    transcript = message.channel.alternatives[0].transcript
-
-                if message.is_final and transcript:
-                    print(transcript)
-
-        except KeyboardInterrupt:
-            print("\nStopped.")
+    try:
+        while True:
+            recorder.text(on_transcript)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        recorder.stop()
