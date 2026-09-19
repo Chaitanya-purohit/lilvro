@@ -21,7 +21,7 @@ if __name__ == "__main__":
         model="tiny.en",
         language="en",
         silero_sensitivity=0.4,
-        post_speech_silence_duration=0.6,
+        post_speech_silence_duration=1.0,
         on_realtime_transcription_stabilized=lambda t: print(f"\r  {t}          ", end="", flush=True),
     )
 
