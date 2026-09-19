@@ -176,7 +176,7 @@ def check_message_with_ai(
 		category, confidence = _parse_ai_result(
 			classifier(_AI_GUARDRAIL_PROMPT.format(message=message.strip()))
 		)
-	except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+	except Exception:
 		return _result(GuardrailCategory.UNCERTAIN, _REDIRECT_RESPONSE)
 
 	if confidence < minimum_confidence or category != GuardrailCategory.ALLOWED:
@@ -186,6 +186,16 @@ def check_message_with_ai(
 		)
 
 	return _result(GuardrailCategory.ALLOWED, "")
+
+
+def check_message_with_openai(
+	message: str,
+	minimum_confidence: float = 0.90,
+) -> GuardrailResult:
+	"""Run the guardrail with the optional OpenAI classifier adapter."""
+	from ai_client import openai_classifier
+
+	return check_message_with_ai(message, openai_classifier, minimum_confidence)
 
 
 def is_safe_for_model(message: str) -> bool:

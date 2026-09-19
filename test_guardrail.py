@@ -1,6 +1,6 @@
 import unittest
 
-from guardrail import GuardrailCategory, check_message, check_message_with_ai
+from guardrail import GuardrailCategory, check_message, check_message_with_ai, check_message_with_openai
 
 
 class GuardrailTests(unittest.TestCase):
@@ -76,6 +76,12 @@ class GuardrailTests(unittest.TestCase):
 
     def test_invalid_ai_result_fails_closed(self) -> None:
         result = check_message_with_ai("Tell me something interesting.", lambda _: "not json")
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, GuardrailCategory.UNCERTAIN)
+
+    def test_openai_adapter_without_key_fails_closed(self) -> None:
+        result = check_message_with_openai("Tell me something interesting.")
 
         self.assertFalse(result.allowed)
         self.assertEqual(result.category, GuardrailCategory.UNCERTAIN)
