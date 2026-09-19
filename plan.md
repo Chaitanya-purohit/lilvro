@@ -275,7 +275,27 @@ Domain is detected from context (surrounding symbols, keywords) before the rule 
 
 ---
 
-## Codebase Structure
+## Andy-agent cohesion
+
+Shared contracts live in `contracts.py` (`Tool`, `Mode`, `Phase`, signals, decisions, session, guidance).
+Every andy-agent module consumes those types:
+
+```
+contracts.py  -> tools.py (route) -> modes.py (phase engines)
+              -> persona.py (voice + local fallbacks)
+              -> mastery.py (score from Phase)
+              -> agent.py (AgentRuntime.turn orchestrator + math_renderer polish)
+```
+
+Pipeline callers should prefer one entrypoint:
+
+```python
+from agent import AgentRuntime
+runtime = AgentRuntime.fresh()
+reply = runtime.turn(normalized_text)          # full reply
+planned = runtime.turn(normalized_text, plan_only=True)  # local routing only
+```
+
 
 ```
 transcribe.py          # mic -> Whisper STT -> transcript (Sam)
@@ -283,12 +303,13 @@ speech_normalizer.py   # spoken text -> Unicode math/chemistry (Chai)
 symbols.json           # bidirectional symbol lexicon, 99 entries
 math_renderer.py       # Unicode math -> speakable English (Kyle)
 chem_normalizer.py     # chemical formula/equation -> speakable (Chai, planned)
+contracts.py           # Shared Tool/Mode/Phase + turn contracts (Andy)
 tools.py               # Fast local tool router + overlays (Andy)
 modes.py               # Teach-back + mistake + walkthrough engines (Andy)
-persona.py             # Peer personality wrapper (Andy)
+persona.py             # Peer personality + local fallbacks (Andy)
 mastery.py             # Per-topic mastery scores (Andy)
-agent.py               # Codex calls with tool/mode overlays (Andy)
-test_tools_modes.py    # Router + mode unit tests (Andy)
+agent.py               # AgentRuntime.turn orchestrator (Andy)
+test_tools_modes.py    # Cohesion + router/mode unit tests (Andy)
 mood_tracker.py        # mood classification from transcript (Sam)
 motivation_engine.py   # streaks, session goals, encouragement (Sam)
 main.py                # Pipecat pipeline — chains all modules
@@ -303,7 +324,7 @@ main.py                # Pipecat pipeline — chains all modules
 |---|---|---|
 | `chai-normalizer` | Chai | `speech_normalizer.py`, `chem_normalizer.py` |
 | `kyle-renderer` | Kyle | `math_renderer.py`, `test_math_renderer.py` |
-| `andy-agent` | Andy | `agent.py`, `tools.py`, `modes.py`, `persona.py`, `mastery.py` |
+| `andy-agent` | Andy | `contracts.py`, `agent.py`, `tools.py`, `modes.py`, `persona.py`, `mastery.py` |
 | `sam-voice` | Sam | `transcribe.py`, `mood_tracker.py`, `motivation_engine.py` |
 
 ---
@@ -316,22 +337,23 @@ main.py                # Pipecat pipeline — chains all modules
 - [x] `symbols.json` — 99-entry bidirectional lexicon
 - [x] `math_renderer.py` — Unicode -> speakable English (8 tests passing)
 - [x] `transcribe.py` — live mic -> STT -> transcript (one-line display)
+- [x] `contracts.py` — shared Tool/Mode/Phase turn contracts
 - [x] `tools.py` — mental_health / motivation / teaching / advising / entertainment + soft adjust
 - [x] `modes.py` — Teach-Back + Mistake + walkthrough phase engines
-- [x] `persona.py` — peer personality wrapper
-- [x] `mastery.py` — per-topic mastery scoring
-- [x] `agent.py` — Codex + history + local safety path + math_renderer polish + retries
-- [x] `test_tools_modes.py` — router/mode coverage
+- [x] `persona.py` — peer personality + local safety/off-topic fallbacks
+- [x] `mastery.py` — per-topic mastery scoring from Phase
+- [x] `agent.py` — `AgentRuntime.turn` orchestrator + history + math_renderer polish + retries
+- [x] `test_tools_modes.py` — cohesion + router/mode coverage
 - [ ] TTS — Deepgram Aura REST call, play audio through speaker
 - [ ] `main.py` — Pipecat pipeline connecting everything
 
 ### Phase 2 — Emotional Layer + Mode Depth
 - [ ] `mood_tracker.py` — classify mood from transcript (feeds soft adjust)
 - [ ] `motivation_engine.py` — streaks, encouragement, session goals
-- [ ] `persona.py` — peer personality wrapper
+- [x] `persona.py` — peer personality wrapper
 - [ ] Teach-Back: multi-topic gap review spoken at end of session
 - [ ] Mistake Mode: difficulty ramp + topic packs (fractions, derivatives, chem)
-- [ ] Entertainment soft-tool for disengagement
+- [x] Entertainment soft-tool for disengagement
 
 ### Phase 3 — Chemistry + Safety
 - [ ] `chem_normalizer.py` — chemical formulas and equations

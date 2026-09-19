@@ -7,97 +7,23 @@ selection stays under a millisecond on each voice turn.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Iterable
 
+from contracts import Mode, SessionState, Tool, TurnDecision, TurnSignals
 
-class Tool(str, Enum):
-    MENTAL_HEALTH = "mental_health"
-    MOTIVATION = "motivation"
-    TEACHING = "teaching"
-    ADVISING = "advising"
-    ENTERTAINMENT = "entertainment"
-
-
-class Mode(str, Enum):
-    WALKTHROUGH = "walkthrough"
-    TEACHBACK = "teachback"
-    MISTAKE = "mistake"
-
-
-@dataclass(slots=True)
-class TurnSignals:
-    """Compressed signals from one student utterance."""
-
-    text: str
-    lower: str
-    word_count: int = 0
-    frustration: int = 0
-    distress: int = 0
-    motivation_need: int = 0
-    advise_ask: int = 0
-    teachback_ask: int = 0
-    mistake_ask: int = 0
-    exit_mode: int = 0
-    engagement: int = 0
-    disengaged: int = 0
-    off_topic: int = 0
-    another_round: int = 0
-    topic_hint: str | None = None
-
-
-@dataclass(slots=True)
-class TurnDecision:
-    """What the agent should do for this turn."""
-
-    primary_tool: Tool
-    support_tool: Tool | None
-    mode: Mode
-    reason: str
-    adjust: bool = False
-    confidence: float = 1.0
-    invite_mode: Mode | None = None
-    topic: str | None = None
-
-
-@dataclass
-class SessionState:
-    """Sticky real-time session memory across turns."""
-
-    tool: Tool = Tool.TEACHING
-    mode: Mode = Mode.WALKTHROUGH
-    support_tool: Tool | None = None
-    turns: int = 0
-    frustration_streak: int = 0
-    success_streak: int = 0
-    short_reply_streak: int = 0
-    disengage_streak: int = 0
-    topic: str | None = None
-    teachback_gaps: list[str] = field(default_factory=list)
-    mistake_active: bool = False
-    last_reason: str = "start"
-    last_phase: str = "idle"
-    invite_teachback_soon: bool = False
-
-    def snapshot(self) -> dict[str, object]:
-        return {
-            "tool": self.tool.value,
-            "support_tool": self.support_tool.value if self.support_tool else None,
-            "mode": self.mode.value,
-            "turns": self.turns,
-            "frustration_streak": self.frustration_streak,
-            "success_streak": self.success_streak,
-            "short_reply_streak": self.short_reply_streak,
-            "disengage_streak": self.disengage_streak,
-            "topic": self.topic,
-            "teachback_gaps": list(self.teachback_gaps),
-            "mistake_active": self.mistake_active,
-            "last_reason": self.last_reason,
-            "last_phase": self.last_phase,
-            "invite_teachback_soon": self.invite_teachback_soon,
-        }
-
+# Re-export contracts so existing `from tools import Tool, Mode, ...` keeps working.
+__all__ = [
+    "Mode",
+    "SessionState",
+    "Tool",
+    "TurnDecision",
+    "TurnSignals",
+    "apply_decision",
+    "build_instructions",
+    "collect_signals",
+    "extract_topic",
+    "route_turn",
+]
 
 # Precompiled once at import — keep voice turns cheap.
 _FRUSTRATION = re.compile(

@@ -1,4 +1,9 @@
-"""Turn normalized student text into a fast, tool-aware Codex response."""
+"""Andy-agent orchestrator: plan locally, reply with Codex, polish for speech.
+
+Public flow:
+    runtime = AgentRuntime.fresh()
+    reply = runtime.turn(normalized_text)   # cohesive one-call API
+"""
 
 from __future__ import annotations
 
@@ -11,24 +16,18 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from contracts import Mode, ModeGuidance, SessionState, Tool, TurnDecision
 from mastery import MasteryBook
 from math_renderer import render_math
 from modes import (
     MistakeState,
-    ModeGuidance,
     TeachbackState,
-    guide_mistake,
-    guide_teachback,
-    guide_walkthrough,
+    guide_for_decision,
     maybe_stop_modes,
     sync_session_from_modes,
 )
-from persona import flavor_for_tool, persona_base_prompt
+from persona import flavor_for_tool, local_fallback, persona_base_prompt
 from tools import (
-    Mode,
-    SessionState,
-    Tool,
-    TurnDecision,
     apply_decision,
     build_instructions,
     collect_signals,
@@ -43,21 +42,6 @@ DEFAULT_MAX_OUTPUT_TOKENS = 140
 HISTORY_TURNS = 6
 MAX_RETRIES = 2
 
-DISTRESS_FALLBACK = (
-    "Hey, I'm really glad you told me. I'm just a study buddy, so please talk to "
-    "a trusted adult or caregiver about how you're feeling right away. I can stay "
-    "with an easy STEM warm-up later if you want."
-)
-
-OFF_TOPIC_FALLBACK = (
-    "I'm only here for STEM study stuff, so let's skip that. Want a quick puzzle "
-    "on fractions, forces, or atoms instead?"
-)
-
-NETWORK_FALLBACK = (
-    "My brain glitched for a second. Want to try the next tiny step together anyway?"
-)
-
 
 class AgentError(RuntimeError):
     """Raised when the agent cannot produce a response."""
@@ -65,7 +49,7 @@ class AgentError(RuntimeError):
 
 @dataclass(slots=True)
 class AgentReply:
-    """Structured real-time turn result."""
+    """Structured real-time turn result for the voice pipeline."""
 
     text: str
     tool: Tool
@@ -108,6 +92,42 @@ class AgentRuntime:
     def remember(self, role: str, text: str) -> None:
         self.history.append({"role": role, "content": text})
 
+    def snapshot(self) -> dict[str, object]:
+        data = self.session.snapshot()
+        data["mastery"] = self.mastery.snapshot()
+        data["teachback_active"] = self.teachback.active
+        data["mistake_active"] = self.mistake.active
+        return data
+
+    def plan(self, normalized_text: str) -> PlannedTurn:
+        planned, _ = plan_turn(normalized_text, self)
+        return planned
+
+    def turn(
+        self,
+        normalized_text: str,
+        *,
+        plan_only: bool = False,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 18.0,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    ) -> AgentReply | PlannedTurn:
+        """One cohesive entrypoint for the voice pipeline."""
+        planned = self.plan(normalized_text)
+        if plan_only:
+            _update_mastery(self, planned)
+            return planned
+        return respond(
+            normalized_text,
+            runtime=self,
+            planned=planned,
+            api_key=api_key,
+            model=model,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+        )
+
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
     if isinstance(payload.get("output_text"), str):
@@ -136,7 +156,6 @@ def _history_input(runtime: AgentRuntime, user_text: str) -> list[dict[str, str]
 
 
 def _polish_speech(text: str) -> str:
-    """Make model output safer for TTS."""
     spoken = render_math(text)
     spoken = spoken.replace("\n", " ")
     while "  " in spoken:
@@ -145,26 +164,38 @@ def _polish_speech(text: str) -> str:
 
 
 def _update_mastery(runtime: AgentRuntime, planned: PlannedTurn) -> float:
-    decision = planned.decision
-    guidance = planned.guidance
-    topic = decision.topic or runtime.session.topic
-    return runtime.mastery.note_turn(
+    topic = planned.decision.topic or runtime.session.topic
+    return runtime.mastery.note_from_guidance(
         topic=topic,
-        engagement=planned.engagement or guidance.phase == "celebrate",
+        guidance=planned.guidance,
         frustration=planned.frustration,
-        teachback_strong=guidance.phase == "concept_check",
-        teachback_gap=guidance.phase in {"intentional_miss", "scaffold"},
-        mistake_catch=guidance.phase == "caught",
-        mistake_miss=guidance.phase in {"hint", "reveal"},
+        engagement=planned.engagement,
     )
 
 
-def _local_reply(decision: TurnDecision) -> str | None:
-    if decision.reason == "distress_signal":
-        return DISTRESS_FALLBACK
-    if decision.reason == "off_topic_redirect":
-        return OFF_TOPIC_FALLBACK
-    return None
+def _make_reply(
+    *,
+    text: str,
+    planned: PlannedTurn,
+    runtime: AgentRuntime,
+    mastery_score: float,
+    local_only: bool,
+) -> AgentReply:
+    decision = planned.decision
+    topic = decision.topic or runtime.session.topic
+    return AgentReply(
+        text=text,
+        tool=decision.primary_tool,
+        support_tool=decision.support_tool,
+        mode=decision.mode,
+        reason=decision.reason,
+        adjust=decision.adjust,
+        phase=planned.guidance.phase_value,
+        topic=topic,
+        mastery=mastery_score,
+        session=runtime.snapshot(),
+        local_only=local_only,
+    )
 
 
 def plan_turn(
@@ -175,14 +206,14 @@ def plan_turn(
     signals = collect_signals(normalized_text)
     decision = route_turn(normalized_text, runtime.session)
     maybe_stop_modes(decision, teachback=runtime.teachback, mistake=runtime.mistake)
-
-    if decision.mode == Mode.TEACHBACK:
-        guidance = guide_teachback(normalized_text, runtime.teachback, decision=decision)
-    elif decision.mode == Mode.MISTAKE:
-        guidance = guide_mistake(normalized_text, runtime.mistake, decision=decision)
-    else:
-        guidance = guide_walkthrough(normalized_text, runtime.session, decision=decision)
-
+    guidance = guide_for_decision(
+        normalized_text,
+        decision=decision,
+        session=runtime.session,
+        teachback=runtime.teachback,
+        mistake=runtime.mistake,
+        signals=signals,
+    )
     apply_decision(runtime.session, decision, signals)
     sync_session_from_modes(
         runtime.session,
@@ -195,16 +226,14 @@ def plan_turn(
         f"disengaged={signals.disengaged} engagement={signals.engagement} "
         f"words={signals.word_count}"
     )
-    return (
-        PlannedTurn(
-            decision,
-            guidance,
-            summary,
-            frustration=bool(signals.frustration or signals.distress),
-            engagement=bool(signals.engagement),
-        ),
-        runtime,
+    planned = PlannedTurn(
+        decision,
+        guidance,
+        summary,
+        frustration=signals.is_frustrated,
+        engagement=signals.is_engaged,
     )
+    return planned, runtime
 
 
 def _call_codex(
@@ -276,39 +305,30 @@ def respond(
     elif runtime is None:
         runtime = AgentRuntime.fresh()
 
-    decision = planned.decision
-    guidance = planned.guidance
     mastery_score = _update_mastery(runtime, planned)
-    topic = decision.topic or runtime.session.topic
+    decision = planned.decision
 
-    local = _local_reply(decision)
+    local = local_fallback(decision.reason)
     if local is not None:
         text = _polish_speech(local)
         runtime.remember("user", normalized_text)
         runtime.remember("assistant", text)
-        return AgentReply(
+        return _make_reply(
             text=text,
-            tool=decision.primary_tool,
-            support_tool=decision.support_tool,
-            mode=decision.mode,
-            reason=decision.reason,
-            adjust=decision.adjust,
-            phase=guidance.phase,
-            topic=topic,
-            mastery=mastery_score,
-            session=runtime.session.snapshot(),
+            planned=planned,
+            runtime=runtime,
+            mastery_score=mastery_score,
             local_only=True,
         )
 
-    extra = [
-        guidance.prompt_addendum,
-        flavor_for_tool(decision.primary_tool.value),
-        runtime.mastery.coaching_line(topic),
-    ]
     instructions = build_instructions(
         decision,
         base_prompt=persona_base_prompt(),
-        extra=extra,
+        extra=[
+            planned.guidance.prompt_addendum,
+            flavor_for_tool(decision.primary_tool),
+            runtime.mastery.coaching_line(decision.topic or runtime.session.topic),
+        ],
         session=runtime.session,
     )
 
@@ -337,34 +357,23 @@ def respond(
         text = _polish_speech(raw)
         local_only = False
     except AgentError:
-        # Keep the voice loop alive if the model blips.
-        text = _polish_speech(NETWORK_FALLBACK)
+        text = _polish_speech(local_fallback("network_error") or "Let's try that again.")
         local_only = True
 
     runtime.remember("user", normalized_text)
     runtime.remember("assistant", text)
-
-    snapshot = runtime.session.snapshot()
-    snapshot["mastery"] = runtime.mastery.snapshot()
-
-    return AgentReply(
+    return _make_reply(
         text=text,
-        tool=decision.primary_tool,
-        support_tool=decision.support_tool,
-        mode=decision.mode,
-        reason=decision.reason,
-        adjust=decision.adjust,
-        phase=guidance.phase,
-        topic=topic,
-        mastery=mastery_score,
-        session=snapshot,
+        planned=planned,
+        runtime=runtime,
+        mastery_score=mastery_score,
         local_only=local_only,
     )
 
 
 def main() -> None:
     runtime = AgentRuntime.fresh()
-    print("lilvro agent ready.")
+    print("lilvro andy-agent ready.")
     print("Modes: walkthrough | teachback | mistake")
     print("Tools: teaching | motivation | advising | mental_health | entertainment")
     print("Type 'quit' to exit. Prefix with 'plan:' to dry-run routing only.\n")
@@ -375,36 +384,38 @@ def main() -> None:
         if normalized_text.lower() in {"quit", "exit", "q"}:
             break
 
-        dry_run = False
+        plan_only = False
         if normalized_text.lower().startswith("plan:"):
-            dry_run = True
+            plan_only = True
             normalized_text = normalized_text[5:].strip()
             if not normalized_text:
                 continue
 
-        planned, runtime = plan_turn(normalized_text, runtime)
-        decision, guidance = planned.decision, planned.guidance
-        mastery = runtime.mastery.get(decision.topic or runtime.session.topic)
+        result = runtime.turn(normalized_text, plan_only=plan_only)
+        if isinstance(result, PlannedTurn):
+            decision, guidance = result.decision, result.guidance
+            mastery = runtime.mastery.get(decision.topic or runtime.session.topic)
+            print(
+                f"[plan] tool={decision.primary_tool.value}"
+                f" support={decision.support_tool.value if decision.support_tool else '-'}"
+                f" mode={decision.mode.value}"
+                f" phase={guidance.phase_value}"
+                f" reason={decision.reason}"
+                f" adjust={decision.adjust}"
+                f" topic={decision.topic or '-'}"
+                f" mastery={mastery:.2f}"
+                f" | {result.signals_summary}"
+            )
+            continue
+
+        reply = result
         print(
-            f"[plan] tool={decision.primary_tool.value}"
-            f" support={decision.support_tool.value if decision.support_tool else '-'}"
-            f" mode={decision.mode.value}"
-            f" phase={guidance.phase}"
-            f" reason={decision.reason}"
-            f" adjust={decision.adjust}"
-            f" topic={decision.topic or '-'}"
-            f" mastery={mastery:.2f}"
-            f" | {planned.signals_summary}"
+            f"[plan] tool={reply.tool.value}"
+            f" mode={reply.mode.value}"
+            f" phase={reply.phase}"
+            f" reason={reply.reason}"
+            f" mastery={reply.mastery:.2f}"
         )
-        if dry_run:
-            # Dry-run still updates mastery lightly via a shadow note for demos.
-            _update_mastery(runtime, planned)
-            continue
-        try:
-            reply = respond(normalized_text, runtime=runtime, planned=planned)
-        except AgentError as exc:
-            print(f"Agent error: {exc}")
-            continue
         tag = "local" if reply.local_only else "codex"
         print(f"Agent ({tag}): {reply.text}\n")
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from contracts import ModeGuidance, Phase
+
 
 @dataclass
 class MasteryBook:
@@ -53,6 +55,26 @@ class MasteryBook:
         if frustration:
             return self.bump(topic, -0.07, event="frustration")
         return self.get(topic)
+
+    def note_from_guidance(
+        self,
+        *,
+        topic: str | None,
+        guidance: ModeGuidance,
+        frustration: bool = False,
+        engagement: bool = False,
+    ) -> float:
+        """Map shared phase contracts onto mastery deltas."""
+        phase = guidance.phase
+        return self.note_turn(
+            topic=topic,
+            engagement=engagement or phase == Phase.CELEBRATE,
+            frustration=frustration,
+            teachback_strong=phase == Phase.CONCEPT_CHECK,
+            teachback_gap=phase in {Phase.INTENTIONAL_MISS, Phase.SCAFFOLD},
+            mistake_catch=phase == Phase.CAUGHT,
+            mistake_miss=phase in {Phase.HINT, Phase.REVEAL},
+        )
 
     def snapshot(self) -> dict[str, object]:
         return {

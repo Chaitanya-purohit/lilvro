@@ -1,4 +1,4 @@
-"""Teach-back and mistake-mode engines for real-time STEM dialogue.
+"""Teach-back, mistake, and walkthrough engines for real-time STEM dialogue.
 
 These are lightweight state machines. They add turn guidance without extra API
 calls so the voice loop can stay snappy.
@@ -8,17 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from tools import Mode, SessionState, TurnDecision, collect_signals, extract_topic
-
-
-@dataclass(slots=True)
-class ModeGuidance:
-    """Extra spoken-instruction hints injected into the model prompt."""
-
-    mode: Mode
-    phase: str
-    prompt_addendum: str
-    notes: list[str] = field(default_factory=list)
+from contracts import Mode, ModeGuidance, Phase, SessionState, TurnDecision, TurnSignals
+from tools import collect_signals, extract_topic
 
 
 @dataclass
@@ -32,7 +23,7 @@ class TeachbackState:
     intentional_misses: int = 0
     strong_points: int = 0
     gaps: list[str] = field(default_factory=list)
-    last_phase: str = "idle"
+    last_phase: Phase = Phase.IDLE
 
     def start(self, topic: str | None = None) -> None:
         self.active = True
@@ -42,11 +33,11 @@ class TeachbackState:
         self.intentional_misses = 0
         self.strong_points = 0
         self.gaps = []
-        self.last_phase = "listen"
+        self.last_phase = Phase.LISTEN
 
     def stop(self) -> None:
         self.active = False
-        self.last_phase = "idle"
+        self.last_phase = Phase.IDLE
 
 
 @dataclass
@@ -61,7 +52,7 @@ class MistakeState:
     misses: int = 0
     difficulty: int = 1
     awaiting_correction: bool = False
-    last_phase: str = "idle"
+    last_phase: Phase = Phase.IDLE
     last_claim: str | None = None
 
     def start(self, topic: str | None = None) -> None:
@@ -73,13 +64,13 @@ class MistakeState:
         self.misses = 0
         self.difficulty = 1
         self.awaiting_correction = False
-        self.last_phase = "plant_mistake"
+        self.last_phase = Phase.PLANT_MISTAKE
         self.last_claim = None
 
     def stop(self) -> None:
         self.active = False
         self.awaiting_correction = False
-        self.last_phase = "idle"
+        self.last_phase = Phase.IDLE
 
 
 _CORRECT = (
@@ -205,18 +196,23 @@ def _wants_done(lower: str) -> bool:
     return any(token in lower for token in _DONE)
 
 
+def _resolve_signals(text: str, signals: TurnSignals | None) -> TurnSignals:
+    return signals if signals is not None else collect_signals(text)
+
+
 def guide_teachback(
     text: str,
     state: TeachbackState,
     *,
     decision: TurnDecision | None = None,
+    signals: TurnSignals | None = None,
 ) -> ModeGuidance:
     """Advance teach-back and return a tiny prompt addendum."""
-    signals = collect_signals(text)
+    signals = _resolve_signals(text, signals)
     lower = signals.lower
 
     if decision and decision.mode != Mode.TEACHBACK and not state.active:
-        return ModeGuidance(Mode.WALKTHROUGH, "idle", "", [])
+        return ModeGuidance(Mode.WALKTHROUGH, Phase.IDLE, "", [])
 
     topic = (decision.topic if decision else None) or signals.topic_hint or extract_topic(text)
     if not state.active:
@@ -235,7 +231,7 @@ def guide_teachback(
         or "i'll explain" in lower
         or "i will explain" in lower
     ):
-        state.last_phase = "listen"
+        state.last_phase = Phase.LISTEN
         notes.append("invite_explanation")
         addendum = (
             "Teach-back phase: listen. Ask them to explain the idea in their own "
@@ -244,7 +240,7 @@ def guide_teachback(
         return ModeGuidance(Mode.TEACHBACK, state.last_phase, addendum, notes)
 
     if _wants_done(lower) and state.turns >= 3:
-        state.last_phase = "wrap"
+        state.last_phase = Phase.WRAP
         notes.append("wrap")
         gap_bit = ""
         if state.gaps:
@@ -255,11 +251,10 @@ def guide_teachback(
         )
         return ModeGuidance(Mode.TEACHBACK, state.last_phase, addendum, notes)
 
-    # Alternate intentional miss vs probe so it doesn't feel naggy.
     if (_looks_vague(lower) or signals.frustration) and state.intentional_misses < 2:
         state.clarification_asks += 1
         state.intentional_misses += 1
-        state.last_phase = "intentional_miss"
+        state.last_phase = Phase.INTENTIONAL_MISS
         gap = text.strip()[:80] or "unclear explanation"
         if gap not in state.gaps:
             state.gaps.append(gap)
@@ -273,7 +268,7 @@ def guide_teachback(
 
     if _looks_substantive(lower) or (signals.engagement and len(lower.split()) >= 6):
         state.strong_points += 1
-        state.last_phase = "concept_check"
+        state.last_phase = Phase.CONCEPT_CHECK
         notes.append("concept_check")
         addendum = (
             "Teach-back phase: concept check. They explained something useful. Ask "
@@ -283,7 +278,7 @@ def guide_teachback(
         return ModeGuidance(Mode.TEACHBACK, state.last_phase, addendum, notes)
 
     if state.clarification_asks >= 2 and _looks_vague(lower):
-        state.last_phase = "scaffold"
+        state.last_phase = Phase.SCAFFOLD
         notes.append("scaffold")
         addendum = (
             "Teach-back phase: scaffold. They are stuck explaining. Give one tiny "
@@ -292,7 +287,7 @@ def guide_teachback(
         )
         return ModeGuidance(Mode.TEACHBACK, state.last_phase, addendum, notes)
 
-    state.last_phase = "probe"
+    state.last_phase = Phase.PROBE
     notes.append("probe")
     addendum = (
         "Teach-back phase: probe. Ask for one concrete example or the next step in "
@@ -306,13 +301,14 @@ def guide_mistake(
     state: MistakeState,
     *,
     decision: TurnDecision | None = None,
+    signals: TurnSignals | None = None,
 ) -> ModeGuidance:
     """Advance mistake mode and return a tiny prompt addendum."""
-    signals = collect_signals(text)
+    signals = _resolve_signals(text, signals)
     lower = signals.lower
 
     if decision and decision.mode != Mode.MISTAKE and not state.active:
-        return ModeGuidance(Mode.WALKTHROUGH, "idle", "", [])
+        return ModeGuidance(Mode.WALKTHROUGH, Phase.IDLE, "", [])
 
     topic = (decision.topic if decision else None) or signals.topic_hint or extract_topic(text)
     if not state.active:
@@ -333,13 +329,11 @@ def guide_mistake(
         )
     )
 
-    # After a catch/reveal, another round or wrap.
-    if state.last_phase in {"caught", "reveal"} and not state.awaiting_correction:
+    if state.last_phase in {Phase.CAUGHT, Phase.REVEAL} and not state.awaiting_correction:
         if _wants_another(lower) or signals.another_round or signals.mistake_ask:
             state.awaiting_correction = False
-            # fall through to plant below
         elif _wants_done(lower) or signals.exit_mode:
-            state.last_phase = "wrap"
+            state.last_phase = Phase.WRAP
             notes.append("wrap")
             addendum = (
                 "Mistake phase: wrap. Praise their checking skill in one sentence "
@@ -347,12 +341,11 @@ def guide_mistake(
             )
             return ModeGuidance(Mode.MISTAKE, state.last_phase, addendum, notes)
 
-    # Plant a mistake for a fresh round.
     if not state.awaiting_correction:
         state.rounds += 1
         state.awaiting_correction = True
         state.hints_given = 0
-        state.last_phase = "plant_mistake"
+        state.last_phase = Phase.PLANT_MISTAKE
         notes.append("plant_mistake")
         addendum = (
             "Mistake phase: plant. State one small, age-safe incorrect STEM claim "
@@ -365,7 +358,7 @@ def guide_mistake(
         state.catches += 1
         state.awaiting_correction = False
         state.difficulty = min(3, state.difficulty + (1 if state.hints_given == 0 else 0))
-        state.last_phase = "caught"
+        state.last_phase = Phase.CAUGHT
         notes.append("caught")
         addendum = (
             "Mistake phase: caught. Confirm they found it. Give the correct idea in "
@@ -377,12 +370,12 @@ def guide_mistake(
     if _looks_missing(lower):
         state.misses += 1
         state.hints_given += 1
-        state.last_phase = "hint"
+        state.last_phase = Phase.HINT
         notes.append("hint")
         if state.hints_given >= 2:
             state.awaiting_correction = False
             state.difficulty = max(1, state.difficulty - 1)
-            state.last_phase = "reveal"
+            state.last_phase = Phase.REVEAL
             addendum = (
                 "Mistake phase: reveal. They missed it twice. Reveal the error "
                 "kindly, explain the correct idea once, and invite them to try a "
@@ -395,8 +388,7 @@ def guide_mistake(
         )
         return ModeGuidance(Mode.MISTAKE, state.last_phase, addendum, notes)
 
-    # Ambiguous reply while awaiting correction — nudge, don't auto-hint.
-    state.last_phase = "nudge"
+    state.last_phase = Phase.NUDGE
     notes.append("nudge")
     addendum = (
         "Mistake phase: nudge. Ask them to say whether each part sounds right, and "
@@ -410,9 +402,10 @@ def guide_walkthrough(
     session: SessionState,
     *,
     decision: TurnDecision | None = None,
+    signals: TurnSignals | None = None,
 ) -> ModeGuidance:
     """Advance default walkthrough pacing without an extra model call."""
-    signals = collect_signals(text)
+    signals = _resolve_signals(text, signals)
     lower = signals.lower
     topic = (decision.topic if decision else None) or session.topic or signals.topic_hint
     topic_line = f" Topic focus: {topic}." if topic else ""
@@ -421,7 +414,7 @@ def guide_walkthrough(
     if decision and decision.reason == "off_topic_redirect":
         return ModeGuidance(
             Mode.WALKTHROUGH,
-            "redirect",
+            Phase.REDIRECT,
             "Walkthrough phase: redirect. Decline off-topic kindly and offer one STEM hook.",
             ["redirect"],
         )
@@ -430,7 +423,7 @@ def guide_walkthrough(
         notes.append("stuck")
         return ModeGuidance(
             Mode.WALKTHROUGH,
-            "stuck",
+            Phase.STUCK,
             "Walkthrough phase: stuck. Shrink the problem to the tiniest next step and "
             f"check understanding with one yes/no or fill-in question.{topic_line}",
             notes,
@@ -440,18 +433,17 @@ def guide_walkthrough(
         notes.append("celebrate")
         return ModeGuidance(
             Mode.WALKTHROUGH,
-            "celebrate",
+            Phase.CELEBRATE,
             "Walkthrough phase: celebrate. Affirm the win in one short phrase, then offer "
             f"either the next micro-step or a teach-back invite.{topic_line}",
             notes,
         )
 
-    # Student attempting an answer / showing work.
     if any(token in lower for token in ("i think", "maybe", "is it", "so then", "equals", "so ")):
         notes.append("check")
         return ModeGuidance(
             Mode.WALKTHROUGH,
-            "check",
+            Phase.CHECK,
             "Walkthrough phase: check. Respond to their attempt. If partly right, keep the "
             f"correct bit and ask one repair question. Do not reveal the whole answer.{topic_line}",
             notes,
@@ -461,7 +453,7 @@ def guide_walkthrough(
         notes.append("orient")
         return ModeGuidance(
             Mode.WALKTHROUGH,
-            "orient",
+            Phase.ORIENT,
             "Walkthrough phase: orient. Restate the goal in kid words, then ask what they "
             f"already know or want to try first.{topic_line}",
             notes,
@@ -470,11 +462,29 @@ def guide_walkthrough(
     notes.append("step")
     return ModeGuidance(
         Mode.WALKTHROUGH,
-        "step",
+        Phase.STEP,
         "Walkthrough phase: step. Give at most one micro-step, then ask one focused "
         f"question that moves them forward.{topic_line}",
         notes,
     )
+
+
+def guide_for_decision(
+    text: str,
+    *,
+    decision: TurnDecision,
+    session: SessionState,
+    teachback: TeachbackState,
+    mistake: MistakeState,
+    signals: TurnSignals | None = None,
+) -> ModeGuidance:
+    """Single mode dispatcher used by the agent orchestrator."""
+    signals = _resolve_signals(text, signals)
+    if decision.mode == Mode.TEACHBACK:
+        return guide_teachback(text, teachback, decision=decision, signals=signals)
+    if decision.mode == Mode.MISTAKE:
+        return guide_mistake(text, mistake, decision=decision, signals=signals)
+    return guide_walkthrough(text, session, decision=decision, signals=signals)
 
 
 def sync_session_from_modes(
@@ -482,13 +492,13 @@ def sync_session_from_modes(
     *,
     teachback: TeachbackState,
     mistake: MistakeState,
-    phase: str | None = None,
+    phase: Phase | str | None = None,
 ) -> None:
     """Keep SessionState aligned with mode engines."""
     session.teachback_gaps = list(teachback.gaps)
     session.mistake_active = mistake.active
-    if phase:
-        session.last_phase = phase
+    if phase is not None:
+        session.last_phase = phase.value if isinstance(phase, Phase) else str(phase)
     if teachback.active:
         session.mode = Mode.TEACHBACK
         session.topic = teachback.topic or session.topic
