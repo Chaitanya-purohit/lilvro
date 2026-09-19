@@ -34,37 +34,87 @@ An AI voice companion for STEM learning, designed to make mathematical and scien
 - Handles: arithmetic, algebra, calculus, matrices, scientific notation, chemical equations, units
 - Built on **Whisper** (STT, open source) + **Claude** (reasoning + pedagogy) + **Deepgram Aura** (TTS only)
 
-### 2. Teach-Back Mode
-- Student explains a concept to the agent
-- Agent listens, then asks concept-check questions
-- Agent can intentionally misunderstand a poorly explained concept to push the student to be more precise
-- Flags and stores weak areas per topic
+### 2. Teach-Back Mode (child teaches the AI)
+Goal: the child becomes the explainer; the AI is the curious peer.
 
-### 3. Quiz Mode
-- Agent deliberately explains something incorrectly
-- Student must identify and correct the error
-- If student misses it, agent gives a hint
-- If student catches it, agent confirms and explains why
-- Builds critical thinking and deeper understanding
+**Entry**
+- Wake phrases: "let me teach you", "I'll explain", "teach-back", "can I explain"
+- Or agent invites: "want to teach me that one?"
+
+**Live loop (real-time)**
+1. **Listen** — AI asks for the child's explanation; no lecture yet
+2. **Probe** — if thin, ask for one concrete example / next step
+3. **Intentional miss** — if vague or fuzzy, AI mildly misunderstands on purpose so the child must sharpen the idea
+4. **Concept check** — if solid, ask one targeted check question and name what was strong
+5. **Gap log** — weak spots stored in session (`teachback_gaps`) for later practice
+
+**Exit**
+- "stop teach-back", "normal mode", "back to studying"
+- Or after a successful concept-check streak, AI offers to switch back
+
+**Implementation**
+- Local state machine in `modes.py` (`TeachbackState`) — no extra LLM hop
+- Sticky mode in `tools.py` router so mid-explanation turns stay in teach-back instantly
+- Prompt overlay injected each turn by `agent.py`
+
+### 3. Mistake Mode (AI plants an error; child corrects it)
+Also called Quiz Mode in product language. Goal: critical listening.
+
+**Entry**
+- Wake phrases: "mistake mode", "quiz me", "catch the mistake", "spot the error"
+
+**Live loop (real-time)**
+1. **Plant** — AI states one small, age-safe incorrect STEM claim + asks the child to check it
+2. **Nudge** — if unclear, ask them to point at the suspicious bit
+3. **Hint** — if they miss, one narrow hint (no full reveal)
+4. **Reveal** — after two misses, kindly reveal + correct in one spoken sentence
+5. **Caught** — if they fix it, celebrate, confirm why, offer another round or exit
+
+**Exit**
+- "stop mistake", "stop quiz", "normal mode"
+- Or after a catch, child can decline another round
+
+**Implementation**
+- Local state machine in `modes.py` (`MistakeState`)
+- Sticky until exit; hints/catches/misses tracked for mastery signals
 
 ### 4. Study / Problem Walkthrough Mode
 - Student brings a problem; agent walks them through it step by step
 - Never gives the final answer directly — guides via Socratic questioning
 - Tracks which steps the student needed help on
+- Default mode when no special wake phrase is active
 
 ---
 
-## Tools
+## Tools (real-time recognition + soft adjust)
 
-The agent has access to the following support modes, activated by context or wake phrase:
+Tools are **not** separate apps. They are fast local intents the agent recognizes every turn, then overlays onto the reply. Routing is keyword/pattern based in `tools.py` — **zero extra model calls** so tool switches keep pace with live voice.
 
-| Tool | Description |
-|---|---|
-| **Mental Health** | Detects frustration, stress, disengagement — responds with care, offers breaks |
-| **Motivation** | Streaks, encouragement, session goals, celebrates progress |
-| **Teaching** | Core Socratic walkthrough and explanation mode |
-| **Entertainment** | Fun facts, analogies, interesting angles on a topic to re-engage a disengaged student |
-| **Advising** | Broader guidance — study tips, how to approach a topic, what to learn next |
+| Tool | When it fires | Behavior |
+|---|---|---|
+| **Mental Health** | Distress / high frustration / overwhelm language | Validate, slow down, offer break/easier step; never diagnose; serious distress → trusted adult |
+| **Motivation** | Pep-talk asks, boredom, "why bother", light fatigue | Short specific encouragement + one tiny next win, then back to learning |
+| **Teaching** | Default STEM help / explain / walkthrough | Socratic: one step, one question, spoken math |
+| **Advising** | Study tips, "what next", how to approach a topic | Concrete micro-plan or practice advice |
+| **Entertainment** | Disengagement / short-reply streaks / boredom | One vivid STEM analogy or wonder, then an easy re-entry question |
+
+### Soft adjust (mid-turn, without fully leaving the lesson)
+- Light frustration → keep **Teaching**, add **Motivation** support overlay
+- Frustration streak ≥ 2 → keep task if possible, add **Mental Health** support overlay
+- Distress keywords → **Mental Health** becomes primary immediately
+- Special modes (teach-back / mistake) stay sticky; support tools can still ride along
+
+### Latency path (must stay real-time)
+```
+normalized text
+  -> collect_signals()     # precompiled regex, <1ms
+  -> route_turn()          # sticky session + priority rules, <1ms
+  -> mode engine           # teachback/mistake phase hint, <1ms
+  -> build_instructions()  # short overlays only
+  -> Codex Responses API   # max_output_tokens capped for short speech
+  -> spoken reply
+```
+No second LLM for classification. Session state (`AgentRuntime`) carries tool/mode/streaks across turns.
 
 ---
 
@@ -130,8 +180,9 @@ Mic input
   -> Whisper STT (open source, local)
     -> speech_normalizer.py      (spoken text -> Unicode math/chemistry)
       -> mood_tracker.py         (classify student mood)
-        -> agent.py              (Claude — Socratic / Teach-Back / Quiz)
-          -> motivation_engine.py  (streaks, encouragement)
+        -> tools.py / modes.py   (local tool+mode route, <1ms)
+          -> agent.py              (Codex — tool overlays + Teach-Back / Mistake)
+            -> motivation_engine.py  (streaks, encouragement)
             -> math_renderer.py    (Unicode math/chemistry -> speakable English)
               -> Deepgram Aura TTS  (natural voice output)
                 -> Speaker
@@ -145,11 +196,16 @@ pipeline = Pipeline([
     WhisperSTTService(),         # open source STT — local, free, no data sent out
     SpeechNormalizerService(),   # Chai's module
     MoodTrackerService(),        # Sam's module
-    ClaudeAgentService(),        # Andy's module
+    ToolRouterService(),         # Andy — local mental_health/motivation/teaching/advising
+    ModeEngineService(),         # Andy — teachback + mistake state machines
+    CodexAgentService(),         # Andy's module
     MathRendererService(),       # Kyle's module
     DeepgramAuraTTSService(),    # TTS — Deepgram used only for voice output
 ])
 ```
+
+Routing and mode phase selection happen **before** the LLM so the spoken reply can adapt every turn without waiting on a classifier model.
+
 
 ### Why Whisper for STT
 - Fully open source (MIT license), runs locally
@@ -227,12 +283,17 @@ speech_normalizer.py   # spoken text -> Unicode math/chemistry (Chai)
 symbols.json           # bidirectional symbol lexicon, 99 entries
 math_renderer.py       # Unicode math -> speakable English (Kyle)
 chem_normalizer.py     # chemical formula/equation -> speakable (Chai, planned)
-agent.py               # Claude calls, Socratic/Teach-Back/Quiz mode (Andy)
+tools.py               # Fast local tool router + overlays (Andy)
+modes.py               # Teach-back + mistake + walkthrough engines (Andy)
+persona.py             # Peer personality wrapper (Andy)
+mastery.py             # Per-topic mastery scores (Andy)
+agent.py               # Codex calls with tool/mode overlays (Andy)
+test_tools_modes.py    # Router + mode unit tests (Andy)
 mood_tracker.py        # mood classification from transcript (Sam)
 motivation_engine.py   # streaks, session goals, encouragement (Sam)
-persona.py             # peer personality wrapper (Andy)
 main.py                # Pipecat pipeline — chains all modules
 ```
+
 
 ---
 
@@ -242,7 +303,7 @@ main.py                # Pipecat pipeline — chains all modules
 |---|---|---|
 | `chai-normalizer` | Chai | `speech_normalizer.py`, `chem_normalizer.py` |
 | `kyle-renderer` | Kyle | `math_renderer.py`, `test_math_renderer.py` |
-| `andy-agent` | Andy | `agent.py`, `persona.py` |
+| `andy-agent` | Andy | `agent.py`, `tools.py`, `modes.py`, `persona.py`, `mastery.py` |
 | `sam-voice` | Sam | `transcribe.py`, `mood_tracker.py`, `motivation_engine.py` |
 
 ---
@@ -255,29 +316,38 @@ main.py                # Pipecat pipeline — chains all modules
 - [x] `symbols.json` — 99-entry bidirectional lexicon
 - [x] `math_renderer.py` — Unicode -> speakable English (8 tests passing)
 - [x] `transcribe.py` — live mic -> STT -> transcript (one-line display)
-- [ ] `agent.py` — Claude Socratic walkthrough
+- [x] `tools.py` — mental_health / motivation / teaching / advising / entertainment + soft adjust
+- [x] `modes.py` — Teach-Back + Mistake + walkthrough phase engines
+- [x] `persona.py` — peer personality wrapper
+- [x] `mastery.py` — per-topic mastery scoring
+- [x] `agent.py` — Codex + history + local safety path + math_renderer polish + retries
+- [x] `test_tools_modes.py` — router/mode coverage
 - [ ] TTS — Deepgram Aura REST call, play audio through speaker
 - [ ] `main.py` — Pipecat pipeline connecting everything
 
-### Phase 2 — Emotional Layer
-- [ ] `mood_tracker.py` — classify mood from transcript
+### Phase 2 — Emotional Layer + Mode Depth
+- [ ] `mood_tracker.py` — classify mood from transcript (feeds soft adjust)
 - [ ] `motivation_engine.py` — streaks, encouragement, session goals
 - [ ] `persona.py` — peer personality wrapper
-- [ ] Quiz Mode
+- [ ] Teach-Back: multi-topic gap review spoken at end of session
+- [ ] Mistake Mode: difficulty ramp + topic packs (fractions, derivatives, chem)
+- [ ] Entertainment soft-tool for disengagement
 
 ### Phase 3 — Chemistry + Safety
 - [ ] `chem_normalizer.py` — chemical formulas and equations
 - [ ] Arrow `→` context detection (chemistry / logic / limits / functions)
 - [ ] Kid safety content filter
-- [ ] Safe messaging on mental health responses
+- [ ] Safe messaging on mental health responses (expand beyond keyword gate)
 
 ### Phase 4 — Hardware
 - [ ] Port voice loop to ESP32 (C++ HTTP client to Deepgram REST)
 - [ ] Whisper offline fallback on device
+- [ ] Keep tool/mode router on-device (already local, no cloud needed)
 
 ---
 
 ## Open Questions
 - Do we need user accounts / persistence for the hackathon, or is session-only fine?
 - What is the peer persona's name and character?
-- How does the student switch modes — wake phrase ("let's do quiz mode") or agent infers from context?
+- Mode switching: wake phrases are implemented; should the agent also auto-invite teach-back after a successful walkthrough?
+- How aggressive should intentional misunderstanding be for younger (8–10) vs older (11–14) kids?
