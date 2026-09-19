@@ -10,7 +10,8 @@ load_dotenv()
 
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_MODEL = "gpt-5-codex"
-SYSTEM_PROMPT = """
+
+_BASE_SYSTEM = """
 You are a friendly STEM study partner for children ages 8 to 14.
 
 The student's message has already been normalized, so mathematical notation is
@@ -20,11 +21,45 @@ Ask one useful question at a time.
 
 Your response will be spoken aloud. Use natural spoken math rather than
 Markdown, LaTeX, code blocks, tables, or visual formatting.
+Never give the final answer directly.
 """.strip()
+
+_MODES = {
+    "walkthrough": (
+        "Guide the student step by step with leading questions. "
+        "Never reveal the answer outright."
+    ),
+    "teach_back": (
+        "The student will explain a concept to you. Ask concept-check questions. "
+        "If they explain something poorly, pretend to misunderstand it so they sharpen their explanation."
+    ),
+    "quiz": (
+        "Explain a concept but include exactly one deliberate mistake. "
+        "Wait for the student to identify it. Give a hint if they miss it. "
+        "Confirm and explain when they find it."
+    ),
+}
+
+_MOOD_NOTES = {
+    "frustrated":  "The student sounds frustrated. Be extra warm, slow down, and simplify.",
+    "confused":    "The student sounds confused. Try a different angle or a simple analogy.",
+    "disengaged":  "The student sounds disengaged. Add a surprising fact or fun angle to pull them back in.",
+    "confident":   "The student sounds confident. Push a little harder and introduce the next idea.",
+    "neutral":     "",
+}
 
 
 class AgentError(RuntimeError):
     """Raised when the agent cannot produce a response."""
+
+
+def _build_system(mode: str, mood: str) -> str:
+    mode_note = _MODES.get(mode, _MODES["walkthrough"])
+    mood_note = _MOOD_NOTES.get(mood, "")
+    system = _BASE_SYSTEM + f"\n\nMode: {mode_note}"
+    if mood_note:
+        system += f"\n\nMood note: {mood_note}"
+    return system
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
@@ -50,12 +85,26 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
 
 def respond(
     normalized_text: str,
+    history: list[dict] | None = None,
+    mood: str = "neutral",
+    mode: str = "walkthrough",
     *,
     api_key: str | None = None,
     model: str | None = None,
     timeout: float = 30.0,
-) -> str:
-    """Return a spoken-response draft for normalized student input."""
+) -> tuple[str, list[dict]]:
+    """
+    Return a spoken response for normalized student input.
+
+    Args:
+        normalized_text: Student input (from speech_normalizer.normalize())
+        history:         Conversation so far — list of {"role": ..., "content": ...}
+        mood:            "neutral" | "frustrated" | "confused" | "confident" | "disengaged"
+        mode:            "walkthrough" | "teach_back" | "quiz"
+
+    Returns:
+        (response_text, updated_history)
+    """
     normalized_text = normalized_text.strip()
     if not normalized_text:
         raise ValueError("normalized_text cannot be empty")
@@ -63,6 +112,15 @@ def respond(
     api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise AgentError("OPENAI_API_KEY is not set.")
+
+    history = list(history or [])
+    history.append({"role": "user", "content": normalized_text})
+
+    # Build input array for Responses API multi-turn
+    input_messages = [
+        {"role": msg["role"], "content": msg["content"]}
+        for msg in history
+    ]
 
     response = requests.post(
         RESPONSES_URL,
@@ -72,8 +130,9 @@ def respond(
         },
         json={
             "model": model or os.getenv("CODEX_MODEL", DEFAULT_MODEL),
-            "instructions": SYSTEM_PROMPT,
-            "input": normalized_text,
+            "instructions": _build_system(mode, mood),
+            "input": input_messages,
+            "max_output_tokens": 150,
         },
         timeout=timeout,
     )
@@ -87,13 +146,37 @@ def respond(
             detail = None
         raise AgentError(detail or f"Codex request failed ({response.status_code}).") from exc
 
-    return _extract_output_text(response.json())
+    reply = _extract_output_text(response.json())
+    history.append({"role": "assistant", "content": reply})
+    return reply, history
 
 
-def main() -> None:
-    normalized_text = input("Normalized text: ")
-    print(respond(normalized_text))
+def detect_mode(text: str, current_mode: str) -> str:
+    """Switch mode based on student wake phrases."""
+    lower = text.lower()
+    if any(p in lower for p in ["quiz mode", "quiz me", "test me", "find the mistake"]):
+        return "quiz"
+    if any(p in lower for p in ["teach back", "let me explain", "i'll explain", "teach you"]):
+        return "teach_back"
+    if any(p in lower for p in ["help me", "walk me through", "walkthrough", "explain this"]):
+        return "walkthrough"
+    return current_mode
 
 
 if __name__ == "__main__":
-    main()
+    print("agent.py terminal test — type to chat, Ctrl+C to quit")
+    print("Switch modes: 'quiz mode' | 'teach back' | 'help me'\n")
+    history = []
+    mode = "walkthrough"
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            if not user_input:
+                continue
+            mode = detect_mode(user_input, mode)
+            print(f"  [mode: {mode}]")
+            response, history = respond(user_input, history, mode=mode)
+            print(f"Agent: {response}\n")
+        except KeyboardInterrupt:
+            print("\nDone.")
+            break
