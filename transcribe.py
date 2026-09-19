@@ -1,77 +1,35 @@
 """
 transcribe.py — Sam's module
 
-Live microphone -> Deepgram WebSocket -> printed transcript.
-Uses raw WebSocket (no SDK) so it works regardless of SDK version.
+Live mic -> RealtimeSTT (faster-whisper, open source) -> clean one-line transcript.
+No interim partials — fires only on complete utterances detected by VAD (silero).
+
+Install: pip install RealtimeSTT
 """
 
-import asyncio
-import json
-import os
-import sounddevice as sd
-import websockets
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SAMPLE_RATE = 16000
-CHANNELS = 1
-DEEPGRAM_URL = (
-    "wss://api.deepgram.com/v1/listen"
-    "?model=nova-2&language=en-US&encoding=linear16"
-    f"&sample_rate={SAMPLE_RATE}&channels={CHANNELS}&interim_results=true"
-)
+from RealtimeSTT import AudioToTextRecorder
 
 
-async def transcribe():
-    api_key = os.getenv("DEEPGRAM_API_KEY")
-    headers = {"Authorization": f"Token {api_key}"}
-
-    async with websockets.connect(DEEPGRAM_URL, additional_headers=headers) as ws:
-        print("Connected to Deepgram.")
-        print("Listening... speak into your microphone. Press Ctrl+C to stop.\n")
-
-        loop = asyncio.get_event_loop()
-        queue = asyncio.Queue()
-
-        def audio_callback(indata, frames, time, status):
-            if status:
-                print("Audio status:", status)
-            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
-
-        async def sender():
-            with sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype="int16",
-                callback=audio_callback,
-                blocksize=4000,
-            ):
-                while True:
-                    chunk = await queue.get()
-                    await ws.send(chunk)
-
-        async def receiver():
-            async for message in ws:
-                data = json.loads(message)
-                if data.get("type") == "Results":
-                    transcript = (
-                        data.get("channel", {})
-                        .get("alternatives", [{}])[0]
-                        .get("transcript", "")
-                    )
-                    is_final = data.get("is_final", False)
-                    if transcript:
-                        if is_final:
-                            print(f"\r> {transcript}          ")
-                        else:
-                            print(f"\r  {transcript}          ", end="", flush=True)
-
-        await asyncio.gather(sender(), receiver())
+def on_transcript(text: str):
+    print(f"\r> {text}          ")
 
 
 if __name__ == "__main__":
+    print("Loading Whisper model (first run downloads ~150MB)...")
+
+    recorder = AudioToTextRecorder(
+        model="tiny.en",
+        language="en",
+        silero_sensitivity=0.4,
+        post_speech_silence_duration=0.6,
+        on_realtime_transcription_stabilized=lambda t: print(f"\r  {t}          ", end="", flush=True),
+    )
+
+    print("Listening... speak into your microphone. Press Ctrl+C to stop.\n")
+
     try:
-        asyncio.run(transcribe())
+        while True:
+            recorder.text(on_transcript)
     except KeyboardInterrupt:
         print("\nStopped.")
+        recorder.stop()
