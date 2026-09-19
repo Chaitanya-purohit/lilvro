@@ -1,0 +1,282 @@
+LILVRO — Full Chat Review
+=========================
+
+1. REPOSITORY SETUP
+-------------------
+- Initialized git repo in /Users/chaitanya/Desktop/HackMIT/Post pivot
+- Created README.md
+- Pushed to https://github.com/Chaitanya-purohit/lilvro.git on main
+
+
+2. SECRET MANAGEMENT
+--------------------
+Files created:
+- .gitignore        — ignores .env and __pycache__
+- .env              — local secrets (gitignored, never committed)
+- .env.example      — template committed so teammates know what keys are needed
+
+Keys managed:
+- DEEPGRAM_API_KEY
+- OPENAI_API_KEY
+- CODEX_MODEL
+
+Note: API key was accidentally pasted in chat and put into .env.example —
+caught and sanitized before it was committed.
+
+
+3. PLAN.MD — EVOLVED OVER MULTIPLE ITERATIONS
+----------------------------------------------
+Started as a basic vision doc, grew into a full technical plan.
+
+Initial version:
+- Vision, target audience (8-14), core philosophy (no screen, voice only)
+- Key modes: Voice Agent, Teach-Back, Mistake Mode, Walkthrough
+- Basic tech stack (Deepgram STT + Claude + TTS)
+- Math-to-speech layer concept
+
+Major update 1 added:
+- Emotional/motivational layer with mood states
+- mood_tracker.py, motivation_engine.py, persona.py
+- Full pipeline diagram
+- Team split across 4 branches
+
+Major update 2 (largest) added:
+- Quiz Mode (renamed from Mistake Mode) — agent explains wrong, student identifies error
+- Kid Safety Features — content filtering, age-appropriate language, no personal data,
+  safe messaging on mental health, topic boundaries
+- Tools — Mental Health / Motivation / Teaching / Entertainment / Advising
+- Dashboard — Motivation / Progression / Mastery / Activity
+- Chemical equations support — H2O, CO2, reaction arrows
+- Arrow context-awareness:
+    chemistry  -> "yields"
+    logic      -> "implies"
+    limits     -> "approaches"
+    functions  -> "maps to"
+- Whisper for STT (open source, local) — Deepgram demoted to TTS only
+- Pipecat — open source pipeline framework to replace manual chaining
+- Updated team branches to chai-normalizer, kyle-renderer, andy-agent, sam-voice
+
+
+4. DEEPGRAM API TEST (test_deepgram.py)
+----------------------------------------
+- v1: used deepgram-sdk — failed, SDK v7.9.0 has incompatible API
+- v2: rewrote using raw requests library — no SDK dependency
+- Sends sample audio URL to Deepgram REST endpoint, prints transcript
+- Working and committed to main
+
+
+5. SYMBOLS.JSON — 99-ENTRY BIDIRECTIONAL LEXICON
+-------------------------------------------------
+Single source of truth for math/science symbols across the whole team.
+
+Each entry structure:
+  {
+    "name":    "membership",
+    "latex":   "\\in",
+    "aliases": ["is in", "belongs to", "is an element of", ...],
+    "tts": {
+      "casual":      "in",
+      "normal":      "is an element of",
+      "pedagogical": "is an element of"
+    },
+    "domain": "set_theory"
+  }
+
+Coverage:
+  Arithmetic     : + - x / = != ~= < > <= >= +- ! % = |
+  Roots          : sqrt, cbrt, 4th root
+  Set Theory     : empty set, membership, subsets, supersets, union,
+                   intersection, set difference, symmetric diff, disjoint union,
+                   N Z Q R C
+  Logic          : AND, OR, NOT, implies, iff, for all, there exists,
+                   therefore, because
+  Calculus       : integral, double/triple/contour integral, partial,
+                   nabla, summation, product, infinity
+  Geometry       : angle, parallel, perpendicular, degree, congruent, similar
+  Linear Algebra : dot product, tensor product, norm
+  Greek lower    : full alphabet (alpha through omega)
+  Greek upper    : Gamma, Delta, Lambda, Pi, Sigma, Omega
+  Number sets    : N Z Q R C
+
+Special features:
+- x (times) is context-dependent:
+    arithmetic    -> "times"
+    set theory    -> "Cartesian product"
+    linear algebra-> "cross product"
+- subset symbol has ambiguity flag (means both subset and proper subset)
+- Three TTS modes per symbol: casual, normal, pedagogical
+
+
+6. SPEECH_NORMALIZER.PY — SPOKEN MATH TO UNICODE (Chai's module)
+-----------------------------------------------------------------
+Converts Deepgram transcript -> structured Unicode math for the LLM.
+
+Examples:
+  "what is the square root of x"          -> "what is sqrt(x)"
+  "x belongs to A union B"                -> "x in A union B"
+  "A is a proper subset of B"             -> "A is a proper subset of B"
+  "the integral from a to b of f dx"      -> "int_a^b f dx"
+  "the sum from i equals 1 to infinity of"-> "sum_{i=1}^{inf}"
+
+Architecture:
+- Loads all mappings from symbols.json — no hardcoded symbol lists
+- Domain auto-detection (arithmetic vs set theory)
+- Handles: derivatives, integrals with bounds, limits, summations,
+  partial derivatives, set-builder notation
+- Context-aware multiplication sign
+- Pre-substitution pass for tokens needed by structured patterns
+
+Tests: 21/21 passing
+
+
+7. MATH_RENDERER.PY — UNICODE MATH TO SPEAKABLE ENGLISH (Kyle's module)
+------------------------------------------------------------------------
+Reverse of the normalizer — converts LLM output to TTS-safe English.
+
+Examples:
+  "sqrt(x) + x^2"   -> "square root of x plus x squared"
+  "x in A union B"  -> "x is an element of A union B"
+  "\frac{dy}{dx}"   -> "the fraction dy over dx"
+
+Features:
+- Strips LaTeX delimiters ($...$, \[...\])
+- Handles LaTeX commands (\frac, \sqrt, \int)
+- Symbol -> spoken from symbols.json
+- Matrix pronunciation
+- Structured notation: derivatives, integrals, limits, scientific notation
+- Cleans markdown artifacts (*, _, `)
+
+Tests: 8/8 passing
+
+
+8. TRANSCRIBE.PY — LIVE MIC TO TRANSCRIPT (Sam's module)
+---------------------------------------------------------
+Evolution through 4 versions:
+
+v1 (Sam original): deepgram.listen.v1.connect() — silent failure, SDK incompatible
+v2 (raw WebSocket): replaced SDK with raw websockets + sounddevice
+    - Connected but showed cascading partial lines:
+        "  what is"
+        "  what is three"
+        "> what is three plus five"
+v3 (RealtimeSTT): replaced Deepgram STT with open source RealtimeSTT
+    - Wraps faster-whisper + silero VAD
+    - Fires only on complete utterances — no interim cascade
+    - Local, free, no student audio sent to third party
+v4 (warnings fixed):
+    - Suppressed HuggingFace and ctranslate2 float16 warnings
+    - Added compute_type="float32" explicitly
+    - post_speech_silence_duration increased to 1.0s
+
+Dependencies resolved:
+- portaudio via homebrew
+- silero-vad package
+- onnxruntime
+- faster-whisper via RealtimeSTT[faster-whisper]
+- silero-vad torch hub trust
+
+
+9. BRANCHES — CREATED AND RENAMED TWICE
+----------------------------------------
+Round 1: Chai, Kyle, Andy, Sam
+Round 2: chai-normalizer, kyle-renderer, andy-agent, sam-voice
+(slash names like chai/normalizer failed due to existing chai ref)
+
+Branch ownership:
+  chai-normalizer : speech_normalizer.py, transcribe.py fixes
+  kyle-renderer   : math_renderer.py, test_math_renderer.py
+  andy-agent      : agent.py, main.py
+  sam-voice       : transcribe.py iterations
+
+Merge history: Kyle, Sam, Chai all merged to main cleanly (zero conflicts).
+Andy's branch not yet merged.
+
+
+10. AGENT.PY — LLM BRAIN (Andy's module, extended)
+---------------------------------------------------
+Andy's original: single-turn, OpenAI Responses API, gpt-5-codex, no history.
+
+Extended with:
+- Multi-turn conversation history
+- Three modes:
+    walkthrough  — Socratic, guides step by step, never gives answer
+    teach_back   — student teaches agent, agent asks concept-checks,
+                   can pretend to misunderstand poor explanations
+    quiz         — agent explains with one deliberate mistake,
+                   student must find it
+- Mood-aware prompting:
+    frustrated  -> warm, slow down, simplify
+    confused    -> different angle, simple analogy
+    disengaged  -> fun fact, surprising angle
+    confident   -> push harder, next concept
+    neutral     -> normal tone
+- detect_mode() — switches mode on voice wake phrases:
+    "quiz mode" / "quiz me"      -> quiz
+    "teach back" / "let me explain" -> teach_back
+    "help me" / "walk me through"   -> walkthrough
+- max_output_tokens=150 — keeps responses short for voice
+- Terminal test harness (python agent.py)
+
+
+11. MAIN.PY — THE FULL PRODUCT
+-------------------------------
+Wires everything into a working voice conversation loop:
+
+  Mic
+   -> RealtimeSTT (faster-whisper, local)
+     -> speech_normalizer.normalize()
+       -> agent.respond()  [OpenAI Responses API + gpt-5-codex]
+         -> math_renderer.render_math()
+           -> Deepgram Aura TTS (REST, linear16, 24kHz)
+             -> Speaker
+
+Features:
+- Mode switching mid-conversation via voice
+- Shows interim transcript while student speaks (overwritten on completion)
+- Shows agent response text before speaking it
+- Graceful error handling on TTS and agent failures
+- Clean startup, Ctrl+C exits
+
+
+12. WHAT'S LEFT TO BUILD
+-------------------------
+CRITICAL (blocks the product):
+  - Test main.py end-to-end (needs OPENAI_API_KEY in .env)
+  - Merge andy-agent to main
+
+PHASE 2:
+  - mood_tracker.py      — classify mood from transcript
+  - motivation_engine.py — streaks, session goals, encouragement
+  - persona.py           — consistent peer personality wrapper
+  - chem_normalizer.py   — chemical formulas + reaction arrows
+
+LATER:
+  - GitHub Actions CI    — auto-run tests on push
+  - ESP32 port           — C++ HTTP to Deepgram TTS
+
+
+13. KEY ARCHITECTURAL DECISIONS
+--------------------------------
+1. No screen — voice in, voice out only
+2. Deepgram STT -> Whisper — open source local STT, Deepgram kept for TTS only
+3. symbols.json as single source of truth — one file, both directions
+4. Pipecat — agreed on as future pipeline framework
+5. Claude API -> OpenAI Responses API — team shifted to gpt-5-codex
+6. Context-aware symbol pronunciation — domain detected before rules applied
+
+
+14. CURRENT FILE INVENTORY (main branch)
+-----------------------------------------
+  .env.example         — API key template
+  .gitignore           — keeps .env out of git
+  plan.md              — full project plan
+  test_deepgram.py     — Deepgram API connectivity test
+  transcribe.py        — live mic -> RealtimeSTT -> transcript
+  speech_normalizer.py — spoken math -> Unicode (21 tests passing)
+  symbols.json         — 99-entry bidirectional symbol lexicon
+  math_renderer.py     — Unicode -> speakable English (8 tests passing)
+  test_math_renderer.py— Kyle's renderer tests
+
+  On andy-agent (not yet merged):
+  agent.py             — LLM call with history, modes, mood
+  main.py              — full voice pipeline
