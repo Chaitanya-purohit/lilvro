@@ -3,23 +3,24 @@
 from __future__ import annotations
 
 import re
-from types import SimpleNamespace
+import json
+from pathlib import Path
+from typing import Any
 
 
-_GREEK_NAMES = {
-	"alpha": "alpha",
-	"beta": "beta",
-	"gamma": "gamma",
-	"delta": "delta",
-	"epsilon": "epsilon",
-	"lambda": "lambda",
-	"mu": "mu",
-	"pi": "pi",
-	"rho": "rho",
-	"sigma": "sigma",
-	"tau": "tau",
-	"phi": "phi",
-	"omega": "omega",
+_SYMBOLS_PATH = Path(__file__).with_name("symbols.json")
+
+
+def _load_symbols() -> dict[str, dict[str, Any]]:
+	with _SYMBOLS_PATH.open(encoding="utf-8") as symbols_file:
+		return json.load(symbols_file)
+
+
+_SYMBOLS = _load_symbols()
+_LATEX_TO_SPOKEN = {
+	entry["latex"]: entry["tts"]["normal"]
+	for entry in _SYMBOLS.values()
+	if entry.get("latex") and entry.get("tts", {}).get("normal")
 }
 
 
@@ -37,7 +38,30 @@ def _replace_latex_commands(text: str) -> str:
 	text = re.sub(r"\\cbrt\s*\{([^{}]+)\}", r"the cube root of \1", text)
 	text = re.sub(r"\\int\s*_\{?([^_{}^ ]+)\}?\s*\^\{?([^{} ]+)\}?", r"the integral from \1 to \2 of", text)
 	text = re.sub(r"\\lim\s*_\{?([^{}]+)\}?", r"the limit as \1", text)
-	text = re.sub(r"\\([A-Za-z]+)", lambda match: _GREEK_NAMES.get(match.group(1), match.group(1)), text)
+	text = re.sub(
+		r"\\([A-Za-z]+)",
+		lambda match: _LATEX_TO_SPOKEN.get("\\" + match.group(1), match.group(1)),
+		text,
+	)
+	return text
+
+
+def _replace_symbols(text: str) -> str:
+	for symbol, entry in sorted(_SYMBOLS.items(), key=lambda item: len(item[0]), reverse=True):
+		spoken = entry.get("tts", {}).get("normal")
+		if spoken:
+			if symbol == "!":
+				text = re.sub(r"(?<=[0-9)\]])!", f" {spoken} ", text)
+			else:
+				text = text.replace(symbol, f" {spoken} ")
+	return text
+
+
+def _replace_ascii_operators(text: str) -> str:
+	text = re.sub(r"(?<=\d)\s*\*\s*(?=[A-Za-z0-9(])", " times ", text)
+	text = re.sub(r"(?<=\w)\s+\*\s+(?=\w)", " times ", text)
+	text = re.sub(r"(?<=\d)\s*/\s*(?=[A-Za-z0-9(])", " divided by ", text)
+	text = re.sub(r"(?<=\w)\s+/\s+(?=\w)", " divided by ", text)
 	return text
 
 
@@ -91,6 +115,8 @@ def render_math(text: str) -> str:
 
 	rendered = _strip_math_delimiters(text)
 	rendered = _replace_latex_commands(rendered)
+	rendered = _replace_ascii_operators(rendered)
+	rendered = _replace_symbols(rendered)
 	rendered = _replace_matrices(rendered)
 	rendered = _replace_structured_notation(rendered)
 	return _clean_for_speech(rendered)
@@ -100,19 +126,7 @@ math_to_speech = render_math
 
 
 if __name__ == "__main__":
-	examples = [
-		r"The derivative of $x^2$ is $2x$.",
-		r"Evaluate $\sqrt{x}$ and $\frac{a}{b}$.",
-		"The matrix [[1,2],[3,4]] has determinant -2.",
-		"Avogadro's number is 6.02e23.",
-	]
-	for example in examples:
-		print(render_math(example))
-
-	print("\nCodex response example:")
-	codex_response = SimpleNamespace(
-		output_text="To solve x^2 = 25, take the square root of both sides: x = sqrt(25) = 5."
-	)
-	speakable_text = render_math(codex_response.output_text)
-	print("Codex:", codex_response.output_text)
-	print("Speakable:", speakable_text)
+	print("Loaded", len(_SYMBOLS), "symbols from", _SYMBOLS_PATH.name)
+	print(render_math(r"The set $A \subseteq B$ means every element of A is in B."))
+	print(render_math(r"The value of $\pi$ is approximately 3.14."))
+	print(render_math(r"The derivative of $x^2$ is $2x$."))
