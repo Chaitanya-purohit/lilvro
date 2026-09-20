@@ -184,7 +184,7 @@ def respond(
         json={
             "model": model or os.getenv("CODEX_MODEL", DEFAULT_MODEL),
             "messages": messages,
-            "max_tokens": 500,
+            "max_completion_tokens": 500,
         },
         timeout=timeout,
     )
