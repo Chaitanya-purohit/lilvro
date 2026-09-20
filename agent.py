@@ -6,10 +6,10 @@ from typing import Any, Optional
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-RESPONSES_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openrouter/free"
+RESPONSES_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+DEFAULT_MODEL = "gemini-3.6-flash"
 HISTORY_LIMIT = 20  # max messages kept (10 turns) — prevents unbounded context growth
 
 # Distress phrases intercepted locally — never sent to external LLM
@@ -143,9 +143,9 @@ def respond(
         history.append({"role": "assistant", "content": _DISTRESS_RESPONSE})
         return _DISTRESS_RESPONSE, history
 
-    api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+    api_key = api_key or os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise AgentError("OPENROUTER_API_KEY is not set.")
+        raise AgentError("GOOGLE_API_KEY is not set.")
 
     history = list(history or [])
     history.append({"role": "user", "content": normalized_text})
@@ -181,7 +181,7 @@ def respond(
             detail = response.json().get("error", {}).get("message")
         except (ValueError, AttributeError):
             detail = None
-        raise AgentError(detail or f"OpenRouter request failed ({response.status_code}).") from exc
+        raise AgentError(detail or f"Google request failed ({response.status_code}).") from exc
 
     reply = _extract_output_text(response.json())
     if not reply.strip():

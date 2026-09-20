@@ -11,8 +11,6 @@ not on interim text, fillers, or mid-sentence cuts.
 
 import os
 import sys
-import tty
-import termios
 import threading
 import warnings
 import logging
@@ -22,6 +20,12 @@ import subprocess
 import time
 import requests
 from dotenv import load_dotenv
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import termios
+    import tty
 
 # Suppress model loading noise
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
@@ -78,6 +82,14 @@ def _toggle_pause():
 
 def _keyboard_watcher():
     """Background thread: press 'p' to toggle pause without killing the process."""
+    if os.name == "nt":
+        while True:
+            ch = msvcrt.getwch()
+            if ch.lower() == "p":
+                _toggle_pause()
+            elif ch == "\x03":
+                return
+
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -94,15 +106,21 @@ def _keyboard_watcher():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-# ------------------------------------------------------------------ #
-#  TTS — Deepgram Aura (afplay avoids CoreAudio conflict with the mic)
+#  TTS — Deepgram Aura
 # ------------------------------------------------------------------ #
 
 _DING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds", "ding.mp3")
 
 def ding():
     """Play a short chime to signal lilvro is about to speak."""
-    subprocess.run(["afplay", _DING], check=False)
+    if sys.platform == "win32":
+        import winsound
+
+        winsound.PlaySound(_DING, winsound.SND_FILENAME)
+    elif sys.platform == "darwin":
+        subprocess.run(["afplay", _DING], check=False)
+    else:
+        subprocess.run(["aplay", _DING], check=False)
 
 
 def speak(text: str):
@@ -123,18 +141,27 @@ def speak(text: str):
         response.raise_for_status()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp = f.name
-        try:
             with wave.open(tmp, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(24000)
                 wf.writeframes(response.content)
+        if sys.platform == "win32":
+            import winsound
+
+            winsound.PlaySound(tmp, winsound.SND_FILENAME)
+        elif sys.platform == "darwin":
             subprocess.run(["afplay", tmp], check=True)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
+        else:
+            subprocess.run(["aplay", tmp], check=True)
     except Exception as e:
         print(f"  [TTS error: {e}]")
+    finally:
+        if "tmp" in locals():
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 # ------------------------------------------------------------------ #
