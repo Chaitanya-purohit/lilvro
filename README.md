@@ -1,6 +1,6 @@
 # lilvro
 
-A voice-only STEM learning companion for students aged 8–14. No screen. No typing. Just talking through problems.
+A voice-only STEM learning companion for students aged 8–14. No screen. No typing. Just talking through problems. Optional **parent dashboard** (Next.js + Supabase) for session history.
 
 ```
 You speak → lilvro listens → lilvro guides (never just gives the answer) → you hear the response
@@ -45,7 +45,7 @@ brew install portaudio
 cp .env.example .env
 # Edit .env and add:
 #   DEEPGRAM_API_KEY   — from console.deepgram.com
-#   OPENROUTER_API_KEY — from openrouter.ai
+#   OPENAI_API_KEY     — from platform.openai.com
 ```
 
 ---
@@ -54,8 +54,14 @@ cp .env.example .env
 
 ```
 DEEPGRAM_API_KEY=...         # Text-to-speech (Deepgram Aura)
-OPENROUTER_API_KEY=...       # LLM inference (OpenRouter free tier)
-CODEX_MODEL=openrouter/free  # Override with any OpenRouter model ID
+DEEPGRAM_VOICE=aura-2-thalia-en
+OPENAI_API_KEY=...           # LLM inference (OpenAI)
+CODEX_MODEL=gpt-4o           # Override with any OpenAI model ID
+
+# Optional — parent dashboard persistence
+# SUPABASE_URL=http://127.0.0.1:54321
+# SUPABASE_SERVICE_ROLE_KEY=...
+# CHILD_ID=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 ```
 
 ---
@@ -79,6 +85,48 @@ python main.py
 
 ---
 
+## Parent dashboard (local)
+
+Uses the same schema for local Docker Supabase and hosted Supabase later (swap URL/keys only).
+
+### 1. Start local Supabase
+
+Requires [Docker](https://docs.docker.com/get-docker/) and the Supabase CLI:
+
+```bash
+npx supabase start
+npx supabase db reset   # migrations + seed.sql
+npx supabase status     # copy API URL, anon key, service_role key
+```
+
+### 2. Dashboard env
+
+```bash
+cp dashboard/.env.local.example dashboard/.env.local
+# fill NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+cd dashboard && npm install && npm run dev
+```
+
+Open http://127.0.0.1:3000
+
+Demo login (from `supabase/seed.sql`): `parent@lilvro.local` / `password123`
+Seeded child id: `bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`
+
+### 3. Persist voice sessions into the DB
+
+Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `CHILD_ID` in root `.env`, then run `python main.py`. Turns are written as you talk; Ctrl+C ends the session and updates streaks. If those vars are unset, the voice loop still runs (store is a no-op).
+
+### Hosted later (Vercel)
+
+1. Hosted Supabase project + `npx supabase db push`
+2. Vercel project with **Root Directory** = `dashboard`
+3. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (and optional service role)
+4. Allow your Vercel URL in Supabase Auth redirect URLs
+
+See [`dashboard/README.md`](dashboard/README.md) for the full checklist.
+
+---
+
 ## Running tests
 
 ```bash
@@ -94,11 +142,14 @@ The speech normalizer has 21 tests and the math renderer has 8 tests, all passin
 ```
 main.py               # Full voice pipeline (entry point)
 agent.py              # LLM brain — history, modes, mood, guardrails
+session_store.py      # Agent → Supabase writes (optional)
 speech_normalizer.py  # Spoken text → math notation (for LLM)
 math_renderer.py      # Math notation → speakable text (for TTS)
 utterance_gate.py     # Only respond when student has finished speaking
 symbols.json          # 99-entry bidirectional math symbol lexicon
 transcribe.py         # Standalone mic transcription test
+supabase/             # Migrations, seed, local config
+dashboard/            # Next.js parent UI
 .env.example          # API key template
 requirements.txt      # Python dependencies
 ```
@@ -124,9 +175,9 @@ Mic
 
 - **macOS only** — audio playback uses `afplay`. Linux/Windows requires replacing this with `aplay` or `sounddevice`.
 - **No parental consent flow** — not yet suitable for unsupervised child use at scale.
-- **Free LLM tier** — `openrouter/free` routes to whichever free model is available. Pin a specific model for consistency.
+- **LLM costs** — defaults to `gpt-4o`; change `CODEX_MODEL` if you need a cheaper model.
 - **English only** — STT uses `tiny.en`.
-- **No persistent sessions** — conversation history is in-memory and clears on exit.
+- **Optional persistence** — without Supabase env vars, conversation history is in-memory and clears on exit.
 
 ---
 

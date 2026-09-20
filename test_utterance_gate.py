@@ -20,6 +20,12 @@ def test_final_ready_after_settle():
     assert ready.text == "help me with fractions"
 
 
+def test_final_ready_immediately_when_no_settle():
+    gate = UtteranceGate(settle_seconds=0.0, reject_trailing_incomplete=False)
+    ready = gate.feed("integrate x squared", speech_ended=True, now=1.0)
+    assert ready.decision == GateDecision.READY
+
+
 def test_filler_ignored():
     gate = UtteranceGate(settle_seconds=0.0)
     result = gate.force_evaluate("um")
@@ -56,6 +62,7 @@ def test_empty_ignored():
 if __name__ == "__main__":
     test_interim_never_ready()
     test_final_ready_after_settle()
+    test_final_ready_immediately_when_no_settle()
     test_filler_ignored()
     test_trailing_incomplete_waits()
     test_commands_allowed_when_short()

@@ -40,6 +40,7 @@ from math_renderer import render_math
 from agent import respond, detect_mode
 from utterance_gate import GateDecision, UtteranceGate
 from speech_styler import style_speech
+from session_store import SessionStore
 
 load_dotenv()
 
@@ -54,6 +55,9 @@ TTS_URL = f"https://api.deepgram.com/v1/speak?model={DEEPGRAM_VOICE}&encoding=li
 # How long after speech stops before we treat the utterance as finished.
 # Kids often pause mid-thought — keep this a bit generous.
 POST_SPEECH_SILENCE = 1.4
+
+# Optional parent-dashboard persistence (no-op if env unset).
+store = SessionStore()
 
 # ------------------------------------------------------------------ #
 #  Feature flags — flip these to enable/disable optional features
@@ -306,6 +310,8 @@ def on_transcript(text: str):
             return
 
         print(f"\r< {speakable}          ")
+        store.record_turn(role="user", content=final_text, mode=mode)
+        store.record_turn(role="assistant", content=speakable, mode=mode)
         ding()
         speak(speakable)
     finally:
@@ -322,6 +328,10 @@ if __name__ == "__main__":
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
     print("Pause: press p  or say 'pause lilvro' / 'resume'")
     print("I only answer after you finish speaking.")
+    if store.enabled:
+        print(f"Session store: on (child {store.child_id[:8]}…)")
+    else:
+        print("Session store: off (set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CHILD_ID)")
     print("Press Ctrl+C to quit\n")
 
     threading.Thread(target=_keyboard_watcher, daemon=True).start()
@@ -343,4 +353,5 @@ if __name__ == "__main__":
             recorder.text(on_transcript)
     except KeyboardInterrupt:
         print("\nGoodbye!")
+        store.end_session()
         recorder.stop()
