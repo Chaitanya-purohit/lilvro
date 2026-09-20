@@ -40,6 +40,10 @@ from math_renderer import render_math
 from agent import respond, detect_mode
 from utterance_gate import GateDecision, UtteranceGate
 from speech_styler import style_speech
+from session_store import SessionStore
+from chem_normalizer import normalize as chem_normalize, render as chem_render
+from content_filter import filter_response
+from mood_tracker import SessionStats
 
 load_dotenv()
 
@@ -55,6 +59,22 @@ TTS_URL = f"https://api.deepgram.com/v1/speak?model={DEEPGRAM_VOICE}&encoding=li
 # Kids often pause mid-thought — keep this a bit generous.
 POST_SPEECH_SILENCE = 1.4
 
+# Optional parent-dashboard persistence (no-op if env unset).
+store = SessionStore()
+
+# ------------------------------------------------------------------ #
+#  Feature flags — flip these to enable/disable optional features
+# ------------------------------------------------------------------ #
+
+# Noise filter: WebRTC VAD-based noise gate on mic input (0 = off, 1-3 = aggressive)
+NOISE_FILTER = True
+NOISE_FILTER_LEVEL = 2  # 1 = mild, 2 = moderate, 3 = aggressive
+
+# Echo cancellation: ignore transcripts that arrive while/just after TTS is playing
+# so the agent never hears and responds to its own voice.
+ECHO_CANCEL = True
+ECHO_CANCEL_COOLDOWN = 1.2  # seconds to ignore mic input after TTS finishes
+
 # ------------------------------------------------------------------ #
 #  State
 # ------------------------------------------------------------------ #
@@ -62,6 +82,7 @@ POST_SPEECH_SILENCE = 1.4
 history = []
 mode = "walkthrough"
 _paused = False
+stats = SessionStats()
 gate = UtteranceGate(
     settle_seconds=0.5,
     min_chars=2,
@@ -70,6 +91,8 @@ gate = UtteranceGate(
 )
 _busy = False  # True while agent/TTS is running — ignore new triggers
 _last_spoken_user = ""
+_speaking = False      # True while TTS audio is actively playing
+_speak_end_time = 0.0  # monotonic timestamp when last TTS finished
 
 
 # ------------------------------------------------------------------ #
@@ -139,7 +162,11 @@ def speak(text: str):
     """Send text to Deepgram Aura TTS and play audio through speaker.
 
     Only called with a complete agent reply — never with partials.
+    Sets _speaking while audio plays so the echo-cancel guard can ignore
+    any mic transcripts that capture our own output.
     """
+    global _speaking, _speak_end_time
+    _speaking = True
     try:
         response = requests.post(
             TTS_URL,
@@ -174,16 +201,27 @@ def speak(text: str):
                 os.unlink(tmp)
             except OSError:
                 pass
+        _speaking = False
+        _speak_end_time = time.monotonic()
 
 
 # ------------------------------------------------------------------ #
 #  Live partials — display only, never reply
 # ------------------------------------------------------------------ #
 
+def _is_self_echo() -> bool:
+    """Return True if we should ignore this transcript — agent is speaking or just finished."""
+    if not ECHO_CANCEL:
+        return False
+    if _speaking:
+        return True
+    return time.monotonic() - _speak_end_time < ECHO_CANCEL_COOLDOWN
+
+
 def on_partial(text: str):
     """Realtime stabilized text: show what we heard, do not answer yet."""
     text = (text or "").strip()
-    if not text or _busy or _paused:
+    if not text or _busy or _paused or _is_self_echo():
         return
     gate.feed(text, speech_ended=False, is_interim=True)
     print(f"\r  … {text}          ", end="", flush=True)
@@ -197,7 +235,7 @@ def on_transcript(text: str):
     """Called when STT thinks speech ended. Gate may still WAIT/IGNORE."""
     global history, mode, _busy, _last_spoken_user, _paused
 
-    if _busy:
+    if _busy or _is_self_echo():
         return
 
     text = (text or "").strip()
@@ -256,12 +294,19 @@ def on_transcript(text: str):
             mode = new_mode
             print(f"  [switched to {mode} mode]")
 
-        normalized = normalize(final_text)
+        # Update mood tracker — feeds into agent's teaching tone
+        turn_mood = stats.update(final_text)
+        current_mood = stats.current_mood
+        if turn_mood != "neutral":
+            print(f"  [mood: {turn_mood} | session: {current_mood}]")
+
+        # Normalize: spoken math + spoken chemistry → canonical notation for LLM
+        normalized = chem_normalize(normalize(final_text))
 
         # Think quietly — do not speak until the full reply exists.
         print("  (thinking)", end="", flush=True)
         try:
-            response_text, history = respond(normalized, history, mode=mode)
+            response_text, history = respond(normalized, history, mode=mode, mood=current_mood)
         except Exception as e:
             print(f"\r  [agent error: {e}]")
             return
@@ -270,12 +315,20 @@ def on_transcript(text: str):
             print("\r  [empty agent reply — staying quiet]")
             return
 
-        speakable = style_speech(render_math(response_text)).strip()
+        # Content guardrails — block age-inappropriate output before it reaches TTS
+        response_text, was_blocked = filter_response(response_text)
+        if was_blocked:
+            print("  [content filter triggered]")
+
+        # Render: math notation + chemistry notation → speakable English
+        speakable = style_speech(chem_render(render_math(response_text))).strip()
         if not speakable:
             print("\r  [nothing to speak]")
             return
 
         print(f"\r< {speakable}          ")
+        store.record_turn(role="user", content=final_text, mode=mode)
+        store.record_turn(role="assistant", content=speakable, mode=mode)
         ding()
         speak(speakable)
     finally:
@@ -292,6 +345,10 @@ if __name__ == "__main__":
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
     print("Pause: press p  or say 'pause lilvro' / 'resume'")
     print("I only answer after you finish speaking.")
+    if store.enabled:
+        print(f"Session store: on (child {store.child_id[:8]}…)")
+    else:
+        print("Session store: off (set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CHILD_ID)")
     print("Press Ctrl+C to quit\n")
 
     threading.Thread(target=_keyboard_watcher, daemon=True).start()
@@ -301,6 +358,7 @@ if __name__ == "__main__":
         language="en",
         compute_type="float32",
         silero_sensitivity=0.4,
+        webrtc_sensitivity=NOISE_FILTER_LEVEL if NOISE_FILTER else 0,
         post_speech_silence_duration=POST_SPEECH_SILENCE,
         # Partials for the UI only — never trigger the agent.
         on_realtime_transcription_stabilized=on_partial,
@@ -311,5 +369,9 @@ if __name__ == "__main__":
             # recorder.text blocks until a silence-delimited utterance.
             recorder.text(on_transcript)
     except KeyboardInterrupt:
-        print("\nGoodbye!")
+        summary = stats.summary()
+        print(f"\nGoodbye!  Session: {summary['utterances']} turns, "
+              f"{summary['elapsed_min']} min, "
+              f"dominant mood: {summary['dominant_mood']}")
+        store.end_session()
         recorder.stop()
