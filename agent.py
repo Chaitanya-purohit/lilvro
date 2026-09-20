@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RESPONSES_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openrouter/free"
+RESPONSES_URL = "https://api.openai.com/v1/responses"
+DEFAULT_MODEL = "gpt-5-codex"
 
 _BASE_SYSTEM = """
 You are a friendly STEM study partner for children ages 8 to 14.
@@ -76,15 +76,24 @@ def _build_system(mode: str, mood: str) -> str:
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
-    """Extract assistant text from an OpenRouter chat completions payload."""
-    try:
-        msg = payload["choices"][0]["message"]
-        text = (msg.get("content") or "").strip()
+    """Extract assistant text from an OpenAI Responses API payload."""
+    if isinstance(payload.get("output_text"), str):
+        text = payload["output_text"].strip()
         if text:
             return text
-    except (KeyError, IndexError):
-        pass
-    raise AgentError("OpenRouter returned no text.")
+
+    parts: list[str] = []
+    for item in payload.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                parts.append(content["text"])
+
+    text = "\n".join(parts).strip()
+    if text:
+        return text
+    raise AgentError("OpenAI returned no text.")
 
 
 def respond(
@@ -121,18 +130,17 @@ def respond(
     if lowered in {"um", "uh", "erm", "hmm", "hm", "ah", "oh", "mm", "mmm"}:
         raise ValueError("utterance is filler only — keep listening")
 
-    api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise AgentError("OPENROUTER_API_KEY is not set.")
+        raise AgentError("OPENAI_API_KEY is not set.")
 
     history = list(history or [])
     history.append({"role": "user", "content": normalized_text})
 
-    # Prepend system message to conversation history
-    messages = [{"role": "system", "content": _build_system(mode, mood)}] + [
-        {"role": msg["role"], "content": msg["content"]}
-        for msg in history
-    ]
+    conversation = "\n".join(
+        f"{'Student' if message['role'] == 'user' else 'Buddy'}: {message['content']}"
+        for message in history
+    )
 
     response = requests.post(
         RESPONSES_URL,
@@ -142,8 +150,9 @@ def respond(
         },
         json={
             "model": model or os.getenv("CODEX_MODEL", DEFAULT_MODEL),
-            "messages": messages,
-            "max_tokens": 500,
+            "instructions": _build_system(mode, mood),
+            "input": conversation,
+            "max_output_tokens": 500,
         },
         timeout=timeout,
     )
@@ -155,7 +164,7 @@ def respond(
             detail = response.json().get("error", {}).get("message")
         except (ValueError, AttributeError):
             detail = None
-        raise AgentError(detail or f"OpenRouter request failed ({response.status_code}).") from exc
+        raise AgentError(detail or f"OpenAI request failed ({response.status_code}).") from exc
 
     reply = _extract_output_text(response.json())
     if not reply.strip():
