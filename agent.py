@@ -1,7 +1,7 @@
 """Turn normalized student text into a voice-friendly Codex response."""
 
 import os
-from typing import Any
+from typing import Any, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -89,12 +89,12 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
 
 def respond(
     normalized_text: str,
-    history: list[dict] | None = None,
+    history: Optional[list[dict]] = None,
     mood: str = "neutral",
     mode: str = "walkthrough",
     *,
-    api_key: str | None = None,
-    model: str | None = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
     timeout: float = 30.0,
 ) -> tuple[str, list[dict]]:
     """
