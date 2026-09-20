@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 realtimesst.log
 *.log
+
+# ESP-IDF local configuration
+firmware/box3/sdkconfig
+firmware/box3/sdkconfig.old

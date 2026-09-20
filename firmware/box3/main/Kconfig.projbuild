@@ -1,0 +1,30 @@
+menu "Desk Buddy configuration"
+
+config DESK_BUDDY_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "S"
+    help
+        Name of the Wi-Fi network for the Desk Buddy station connection.
+
+config DESK_BUDDY_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    help
+        Password for the configured Wi-Fi network. This value is intentionally
+        empty by default and must be set with `idf.py menuconfig` when required.
+
+config DESK_BUDDY_BACKEND_HOST
+    string "Desk Buddy backend host or IP address"
+    default ""
+    help
+        IP address or DNS name of the Mac running box3_audio_server.py. Leave
+        this empty to retain microphone-level testing without audio streaming.
+
+config DESK_BUDDY_BACKEND_PORT
+    int "Desk Buddy backend TCP port"
+    default 8787
+    range 1 65535
+    help
+        TCP port used by box3_audio_server.py.
+
+endmenu
