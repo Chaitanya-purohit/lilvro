@@ -49,9 +49,10 @@ type State = "idle" | "agent_speaking" | "child_speaking";
 type TranscriptEntry = { role: "user" | "assistant"; content: string };
 
 const WS_URL =
-  typeof window !== "undefined"
+  process.env.NEXT_PUBLIC_WS_URL ??
+  (typeof window !== "undefined"
     ? `ws://${window.location.hostname}:8765`
-    : "ws://localhost:8765";
+    : "ws://localhost:8765");
 
 const W = 500;
 const H = 500;
