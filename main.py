@@ -56,6 +56,19 @@ TTS_URL = f"https://api.deepgram.com/v1/speak?model={DEEPGRAM_VOICE}&encoding=li
 POST_SPEECH_SILENCE = 1.4
 
 # ------------------------------------------------------------------ #
+#  Feature flags — flip these to enable/disable optional features
+# ------------------------------------------------------------------ #
+
+# Noise filter: WebRTC VAD-based noise gate on mic input (0 = off, 1-3 = aggressive)
+NOISE_FILTER = True
+NOISE_FILTER_LEVEL = 2  # 1 = mild, 2 = moderate, 3 = aggressive
+
+# Echo cancellation: ignore transcripts that arrive while/just after TTS is playing
+# so the agent never hears and responds to its own voice.
+ECHO_CANCEL = True
+ECHO_CANCEL_COOLDOWN = 1.2  # seconds to ignore mic input after TTS finishes
+
+# ------------------------------------------------------------------ #
 #  State
 # ------------------------------------------------------------------ #
 
@@ -70,6 +83,8 @@ gate = UtteranceGate(
 )
 _busy = False  # True while agent/TTS is running — ignore new triggers
 _last_spoken_user = ""
+_speaking = False      # True while TTS audio is actively playing
+_speak_end_time = 0.0  # monotonic timestamp when last TTS finished
 
 
 # ------------------------------------------------------------------ #
@@ -139,7 +154,11 @@ def speak(text: str):
     """Send text to Deepgram Aura TTS and play audio through speaker.
 
     Only called with a complete agent reply — never with partials.
+    Sets _speaking while audio plays so the echo-cancel guard can ignore
+    any mic transcripts that capture our own output.
     """
+    global _speaking, _speak_end_time
+    _speaking = True
     try:
         response = requests.post(
             TTS_URL,
@@ -174,16 +193,27 @@ def speak(text: str):
                 os.unlink(tmp)
             except OSError:
                 pass
+        _speaking = False
+        _speak_end_time = time.monotonic()
 
 
 # ------------------------------------------------------------------ #
 #  Live partials — display only, never reply
 # ------------------------------------------------------------------ #
 
+def _is_self_echo() -> bool:
+    """Return True if we should ignore this transcript — agent is speaking or just finished."""
+    if not ECHO_CANCEL:
+        return False
+    if _speaking:
+        return True
+    return time.monotonic() - _speak_end_time < ECHO_CANCEL_COOLDOWN
+
+
 def on_partial(text: str):
     """Realtime stabilized text: show what we heard, do not answer yet."""
     text = (text or "").strip()
-    if not text or _busy or _paused:
+    if not text or _busy or _paused or _is_self_echo():
         return
     gate.feed(text, speech_ended=False, is_interim=True)
     print(f"\r  … {text}          ", end="", flush=True)
@@ -197,7 +227,7 @@ def on_transcript(text: str):
     """Called when STT thinks speech ended. Gate may still WAIT/IGNORE."""
     global history, mode, _busy, _last_spoken_user, _paused
 
-    if _busy:
+    if _busy or _is_self_echo():
         return
 
     text = (text or "").strip()
@@ -301,6 +331,7 @@ if __name__ == "__main__":
         language="en",
         compute_type="float32",
         silero_sensitivity=0.4,
+        webrtc_sensitivity=NOISE_FILTER_LEVEL if NOISE_FILTER else 0,
         post_speech_silence_duration=POST_SPEECH_SILENCE,
         # Partials for the UI only — never trigger the agent.
         on_realtime_transcription_stabilized=on_partial,
