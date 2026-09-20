@@ -98,6 +98,13 @@ def _keyboard_watcher():
 #  TTS — Deepgram Aura (afplay avoids CoreAudio conflict with the mic)
 # ------------------------------------------------------------------ #
 
+_DING = "/System/Library/Sounds/Tink.aiff"
+
+def ding():
+    """Play a short chime to signal lilvro is about to speak."""
+    subprocess.run(["afplay", _DING], check=False)
+
+
 def speak(text: str):
     """Send text to Deepgram Aura TTS and play audio through speaker.
 
@@ -230,6 +237,7 @@ def on_transcript(text: str):
             return
 
         print(f"\r< {speakable}          ")
+        ding()
         speak(speakable)
     finally:
         _busy = False
