@@ -58,9 +58,9 @@ const W = 500;
 const H = 500;
 const CX = W / 2;
 const CY = H / 2;
-const BASE_R = 120;
-const VARIANCE = 36;
-const N_PTS = 10;
+const BASE_R = 130;
+const VARIANCE = 18;
+const N_PTS = 14;
 
 export default function BlobInterface() {
   const greenRef = useRef<SVGPathElement>(null);
@@ -99,7 +99,7 @@ export default function BlobInterface() {
     gsap.killTweensOf(yellowRef.current);
 
     if (state === "agent_speaking") {
-      // Green blob pulses larger
+      // Green blob pulses larger, yellow hidden
       gsap.to(wrapperRef.current, {
         scale: 1.22,
         transformOrigin: "50% 50%",
@@ -108,13 +108,13 @@ export default function BlobInterface() {
         yoyo: true,
         repeat: -1,
       });
-      gsap.set(yellowRef.current, { opacity: 0 });
+      gsap.to(yellowRef.current, { opacity: 0, scale: 0.3, duration: 0.25 });
     } else if (state === "child_speaking") {
-      // Green blob at normal size, yellow inner blob appears
+      // Green blob steady, yellow inner blob fully bright
       gsap.to(wrapperRef.current, { scale: 1, duration: 0.3, ease: "power2.out" });
-      gsap.to(yellowRef.current, { opacity: 1, scale: 0.55, duration: 0.3, ease: "back.out(1.2)" });
+      gsap.to(yellowRef.current, { opacity: 1, scale: 0.52, duration: 0.3, ease: "back.out(1.2)" });
     } else {
-      // Idle — green blob breathes slowly
+      // Idle — green blob breathes slowly, yellow softly glows to show it's listening
       gsap.to(wrapperRef.current, {
         scale: 1,
         transformOrigin: "50% 50%",
@@ -131,7 +131,17 @@ export default function BlobInterface() {
         repeat: -1,
         delay: 0.6,
       });
-      gsap.to(yellowRef.current, { opacity: 0, scale: 0.3, duration: 0.3 });
+      // Soft yellow glow pulses in idle — indicates listening
+      gsap.to(yellowRef.current, { opacity: 0.35, scale: 0.38, duration: 0.8, ease: "sine.inOut" });
+      gsap.to(yellowRef.current, {
+        opacity: 0.55,
+        scale: 0.42,
+        duration: 2.2,
+        ease: "sine.inOut",
+        yoyo: true,
+        repeat: -1,
+        delay: 0.8,
+      });
     }
   }, []);
 
@@ -230,8 +240,8 @@ export default function BlobInterface() {
           <path
             ref={yellowRef}
             fill="#ffd54f"
-            opacity={0}
-            style={{ transformOrigin: `${CX}px ${CY}px`, transform: "scale(0.3)" }}
+            opacity={0.35}
+            style={{ transformOrigin: `${CX}px ${CY}px`, transform: "scale(0.38)" }}
           />
         </g>
       </svg>
