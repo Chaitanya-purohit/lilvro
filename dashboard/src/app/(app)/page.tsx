@@ -1,95 +1,63 @@
 import Link from "next/link";
 import { WeekActivityChart } from "@/components/WeekActivityChart";
 import {
-  EmptyState,
   MasteryBar,
   ModeBadge,
   PageHeader,
   StatCard,
   TextLink,
 } from "@/components/ui";
-import { formatDuration, formatPct, getSelectedChild } from "@/lib/data";
-import { createClient } from "@/lib/supabase/server";
+import { formatDuration, formatPct } from "@/lib/data";
 
-export default async function OverviewPage() {
-  const child = await getSelectedChild();
-  if (!child) {
-    return (
-      <>
-        <PageHeader
-          eyebrow="Parent dashboard"
-          title="Welcome to Lil-Vro"
-          description="Add a child profile to start seeing study sessions, streaks, and mastery."
-        />
-        <EmptyState
-          title="No children yet"
-          body="Create a nickname-only profile on the Children page. You can link the voice agent with that child’s ID later."
-          action={
-            <Link href="/children" className="btn-primary inline-block">
-              Add a child
-            </Link>
-          }
-        />
-      </>
-    );
-  }
+// ─── Mock data ────────────────────────────────────────────────────────────────
 
-  const supabase = await createClient();
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
+function daysAgo(n: number, hour = 16) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  d.setHours(hour, 30, 0, 0);
+  return d.toISOString();
+}
 
-  const weekOfStr = weekAgo.toISOString().slice(0, 10);
+const CHILD_NAME = "Alex";
 
-  const [{ data: stats }, { data: sessions }, { data: mastery }, { data: weekStats }, { data: emergencyStops }] = await Promise.all([
-    supabase.from("child_stats").select("*").eq("child_id", child.id).maybeSingle(),
-    supabase
-      .from("sessions")
-      .select("*")
-      .eq("child_id", child.id)
-      .gte("started_at", weekAgo.toISOString())
-      .order("started_at", { ascending: false }),
-    supabase
-      .from("mastery_scores")
-      .select("*")
-      .eq("child_id", child.id)
-      .order("score", { ascending: false })
-      .limit(5),
-    supabase
-      .from("session_stats")
-      .select("problems_solved, subjects, mood_counts, topics_needing_help")
-      .eq("child_id", child.id)
-      .gte("week_of", weekOfStr),
-    supabase
-      .from("emergency_stops")
-      .select("id")
-      .eq("child_id", child.id)
-      .gte("triggered_at", weekAgo.toISOString()),
-  ]);
+const MOCK_STATS = {
+  current_streak_days: 7,
+  longest_streak_days: 12,
+  sessions_completed: 34,
+};
 
-  const weekSessions = sessions ?? [];
+const MOCK_SESSIONS = [
+  { id: "s1", started_at: daysAgo(0), duration_seconds: 1800, topic: "algebra",     primary_mode: "walkthrough", turn_count: 24 },
+  { id: "s2", started_at: daysAgo(1), duration_seconds: 1320, topic: "fractions",   primary_mode: "practice",    turn_count: 18 },
+  { id: "s3", started_at: daysAgo(2), duration_seconds: 2700, topic: "geometry",    primary_mode: "teach-back",  turn_count: 31 },
+  { id: "s4", started_at: daysAgo(4), duration_seconds: 1080, topic: "percentages", primary_mode: "practice",    turn_count: 14 },
+  { id: "s5", started_at: daysAgo(5), duration_seconds: 1680, topic: "algebra",     primary_mode: "walkthrough", turn_count: 21 },
+];
+
+const MOCK_MASTERY = [
+  { topic: "Fractions",   score: 0.82 },
+  { topic: "Algebra",     score: 0.74 },
+  { topic: "Geometry",    score: 0.61 },
+  { topic: "Percentages", score: 0.55 },
+  { topic: "Ratios",      score: 0.48 },
+];
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function OverviewPage() {
   const weekMinutes = Math.round(
-    weekSessions.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0) / 60,
+    MOCK_SESSIONS.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0) / 60,
   );
-  const topTopic = mastery?.[0];
-
-  // Aggregate problems solved + subjects this week
-  const weekStatRows = weekStats ?? [];
-  const weekProblems = weekStatRows.reduce((sum, r) => sum + (r.problems_solved ?? 0), 0);
-  const weekSubjects: Record<string, number> = {};
-  for (const row of weekStatRows) {
-    for (const [subj, count] of Object.entries(row.subjects ?? {})) {
-      weekSubjects[subj] = (weekSubjects[subj] ?? 0) + (count as number);
-    }
-  }
-  const topSubject = Object.entries(weekSubjects).sort((a, b) => b[1] - a[1])[0];
-  const stopCount = (emergencyStops ?? []).length;
+  const topTopic = MOCK_MASTERY[0];
+  const weekProblems = 23;
+  const topSubject: [string, number] = ["algebra", 12];
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Parent dashboard"
-        title={`${child.display_name}'s week`}
-        description="Motivation, study time, and what they’re getting more confident with — without interrupting the voice session."
+        title={`${CHILD_NAME}'s week`}
+        description="Motivation, study time, and what they're getting more confident with — without interrupting the voice session."
         action={
           <div className="flex items-center gap-2 rounded-full bg-white/80 px-3 py-1.5 text-sm text-[var(--muted)] shadow-sm">
             <span className="live-dot h-2 w-2 rounded-full bg-[var(--accent)]" />
@@ -101,99 +69,81 @@ export default async function OverviewPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Current streak"
-          value={`${stats?.current_streak_days ?? 0} days`}
-          hint={`Best: ${stats?.longest_streak_days ?? 0} days`}
+          value={`${MOCK_STATS.current_streak_days} days`}
+          hint={`Best: ${MOCK_STATS.longest_streak_days} days`}
           delay={40}
         />
         <StatCard
           label="Sessions this week"
-          value={weekSessions.length}
-          hint={`${stats?.sessions_completed ?? 0} all time`}
+          value={MOCK_SESSIONS.length}
+          hint={`${MOCK_STATS.sessions_completed} all time`}
           delay={90}
         />
         <StatCard
           label="Problems solved"
           value={weekProblems}
-          hint={topSubject ? `Top subject: ${topSubject[0]} (${topSubject[1]})` : "Study time this week"}
+          hint={`Top subject: ${topSubject[0]} (${topSubject[1]})`}
           delay={130}
         />
         <StatCard
           label="Study time"
           value={`${weekMinutes} min`}
-          hint={
-            stopCount > 0
-              ? `${stopCount} emergency stop${stopCount > 1 ? "s" : ""} this week`
-              : topTopic
-              ? `Strongest: ${topTopic.topic} (${formatPct(topTopic.score)})`
-              : "Mastery builds as they practice"
-          }
+          hint={`Strongest: ${topTopic.topic} (${formatPct(topTopic.score)})`}
           delay={170}
         />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
-          <WeekActivityChart sessions={weekSessions} />
+          <WeekActivityChart sessions={MOCK_SESSIONS} />
         </div>
         <section className="panel page-enter lg:col-span-2" style={{ animationDelay: "120ms" }}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="display text-xl">Top topics</h2>
-            <TextLink href="/mastery">Mastery</TextLink>
+            <TextLink href="#">Mastery</TextLink>
           </div>
-          {(mastery ?? []).length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">
-              Mastery scores appear after walkthrough and teach-back sessions.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {(mastery ?? []).map((m, i) => (
-                <MasteryBar key={m.topic} topic={m.topic} score={m.score} delay={i * 60} />
-              ))}
-            </div>
-          )}
+          <div className="space-y-4">
+            {MOCK_MASTERY.map((m, i) => (
+              <MasteryBar key={m.topic} topic={m.topic} score={m.score} delay={i * 60} />
+            ))}
+          </div>
         </section>
       </div>
 
       <section className="panel page-enter" style={{ animationDelay: "160ms" }}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="display text-xl">Recent sessions</h2>
-          <TextLink href="/activity">All activity</TextLink>
+          <TextLink href="#">All activity</TextLink>
         </div>
-        {weekSessions.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">
-            No sessions in the last 7 days yet. When they study with Lil-Vro, sessions show up here.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--border)]">
-            {weekSessions.slice(0, 5).map((s) => (
-              <li key={s.id}>
-                <Link
-                  href={`/sessions/${s.id}`}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3 transition hover:bg-[var(--surface)]/60 sm:px-2"
-                >
-                  <div className="min-w-0">
-                    <p className="font-semibold capitalize text-[var(--ink-soft)]">
-                      {s.topic ?? "General practice"}
-                    </p>
-                    <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-                      <ModeBadge mode={s.primary_mode} />
-                      <span>{formatDuration(s.duration_seconds)}</span>
-                      <span>·</span>
-                      <span>{s.turn_count} turns</span>
-                    </p>
-                  </div>
-                  <span className="text-sm text-[var(--muted)]">
-                    {new Date(s.started_at).toLocaleDateString(undefined, {
-                      weekday: "short",
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+        <ul className="divide-y divide-[var(--border)]">
+          {MOCK_SESSIONS.slice(0, 5).map((s) => (
+            <li key={s.id}>
+              <Link
+                href="#"
+                className="flex flex-wrap items-center justify-between gap-3 py-3 transition hover:bg-[var(--surface)]/60 sm:px-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold capitalize text-[var(--ink-soft)]">
+                    {s.topic ?? "General practice"}
+                  </p>
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                    <ModeBadge mode={s.primary_mode} />
+                    <span>{formatDuration(s.duration_seconds)}</span>
+                    <span>·</span>
+                    <span>{s.turn_count} turns</span>
+                  </p>
+                </div>
+                <span className="text-sm text-[var(--muted)]">
+                  {new Date(s.started_at).toLocaleDateString(undefined, {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
     </div>
   );

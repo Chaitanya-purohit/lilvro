@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import gsap from "gsap";
+import { MathToggle } from "@/components/MathToggle";
 
 // ─── Blob path generator ─────────────────────────────────────────────────────
 // Generates a smooth organic blob as an SVG path string.
@@ -233,6 +234,9 @@ export default function BlobInterface() {
           />
         </g>
       </svg>
+
+      {/* ── Parent toggle ── */}
+      <MathToggle targetHref="/" label="Parent view" theme="white" />
 
       {/* ── Emergency stop button ── */}
       <button

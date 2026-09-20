@@ -294,6 +294,10 @@ export type Database = {
         Args: { cid: string };
         Returns: boolean;
       };
+      delete_child_data: {
+        Args: { cid: string };
+        Returns: void;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

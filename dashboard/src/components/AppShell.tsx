@@ -1,23 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ChildSwitcher } from "@/components/ChildSwitcher";
-import { NavLinks } from "@/components/NavLinks";
-import { createClient } from "@/lib/supabase/server";
+import { MathToggle } from "@/components/MathToggle";
 
-export async function AppShell({
-  children,
-  childOptions,
-  selectedChildId,
-}: {
-  children: React.ReactNode;
-  childOptions: { id: string; display_name: string }[];
-  selectedChildId: string | null;
-}) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[var(--surface)]/90 backdrop-blur-md">
@@ -37,28 +22,15 @@ export async function AppShell({
                 for parents
               </span>
             </Link>
-            <div className="flex items-center gap-3 sm:gap-4">
-              <ChildSwitcher childrenList={childOptions} selectedId={selectedChildId} />
-              {user ? (
-                <form action="/auth/signout" method="post">
-                  <button
-                    type="submit"
-                    className="rounded-lg px-2 py-1.5 text-sm text-[var(--muted)] transition hover:bg-white/70 hover:text-[var(--ink)]"
-                  >
-                    Sign out
-                  </button>
-                </form>
-              ) : null}
-            </div>
           </div>
-          <NavLinks />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">{children}</main>
       <footer className="mx-auto max-w-6xl px-4 pb-10 text-sm text-[var(--muted)] sm:px-6">
-        Study sessions stay on your family’s account. No kid-facing screen during tutoring with
+        Study sessions stay on your family&apos;s account. No kid-facing screen during tutoring with
         Lil-Vro.
       </footer>
+      <MathToggle targetHref="/child" label="Child view" />
     </div>
   );
 }
