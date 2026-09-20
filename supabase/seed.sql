@@ -5,6 +5,8 @@
 create extension if not exists "pgcrypto";
 
 -- Auth user (local only; enable_confirmations = false in config.toml)
+-- GoTrue requires token/change columns to be '' not NULL or login returns
+-- "Database error querying schema".
 insert into auth.users (
   instance_id,
   id,
@@ -16,7 +18,16 @@ insert into auth.users (
   raw_app_meta_data,
   raw_user_meta_data,
   created_at,
-  updated_at
+  updated_at,
+  confirmation_token,
+  recovery_token,
+  email_change_token_new,
+  email_change_token_current,
+  reauthentication_token,
+  phone_change_token,
+  email_change,
+  phone,
+  phone_change
 ) values (
   '00000000-0000-0000-0000-000000000000',
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -28,7 +39,16 @@ insert into auth.users (
   '{"provider":"email","providers":["email"]}'::jsonb,
   '{"display_name":"Demo Parent"}'::jsonb,
   now(),
-  now()
+  now(),
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  ''
 ) on conflict (id) do nothing;
 
 -- identity for email login

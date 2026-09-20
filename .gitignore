@@ -13,3 +13,7 @@ lilvro-1/
 dashboard/.next-dev/
 dashboard/.next/
 dashboard/node_modules/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
