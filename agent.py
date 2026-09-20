@@ -95,10 +95,18 @@ def respond(
 
     Returns:
         (response_text, updated_history)
+
+    Raises:
+        ValueError: if the utterance is empty (caller should not speak yet)
     """
     normalized_text = normalized_text.strip()
     if not normalized_text:
-        raise ValueError("normalized_text cannot be empty")
+        raise ValueError("normalized_text cannot be empty — wait until the student finishes speaking")
+
+    # Soft guard: do not invent a reply from pure hesitation noise.
+    lowered = normalized_text.lower().strip(".,!? ")
+    if lowered in {"um", "uh", "erm", "hmm", "hm", "ah", "oh", "mm", "mmm"}:
+        raise ValueError("utterance is filler only — keep listening")
 
     api_key = api_key or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -137,6 +145,8 @@ def respond(
         raise AgentError(detail or f"OpenRouter request failed ({response.status_code}).") from exc
 
     reply = _extract_output_text(response.json())
+    if not reply.strip():
+        raise AgentError("Codex returned empty text — not speaking yet.")
     history.append({"role": "assistant", "content": reply})
     return reply, history
 
