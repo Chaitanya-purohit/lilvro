@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lil-Vro</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #e8f5e2;
+    overflow: hidden;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #stage {
+    width: 100vw; height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  svg { overflow: visible; }
+
+  /* ── Emergency stop ── */
+  #stop-btn {
+    position: fixed;
+    bottom: clamp(1.5rem, 4vh, 3rem);
+    left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.55);
+    border: 1.5px solid rgba(0,0,0,0.12);
+    border-radius: 999px;
+    padding: 0.55rem 1.4rem;
+    font-size: 0.78rem; font-weight: 600;
+    color: #c62828; cursor: pointer;
+    backdrop-filter: blur(8px);
+    letter-spacing: 0.03em;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    transition: background 0.15s;
+    z-index: 10;
+  }
+  #stop-btn:hover { background: rgba(255,255,255,0.85); }
+
+  /* ── Parent view toggle ── */
+  #parent-btn {
+    position: fixed;
+    bottom: clamp(1.5rem, 4vh, 3rem);
+    right: 1.5rem;
+    background: rgba(255,255,255,0.7);
+    border: 1.5px solid rgba(0,0,0,0.12);
+    border-radius: 999px;
+    padding: 0.55rem 1.3rem;
+    font-size: 0.78rem; font-weight: 600;
+    color: #1b5e20; cursor: pointer;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 14px rgba(0,0,0,0.1);
+    letter-spacing: 0.02em;
+    transition: opacity 0.15s;
+    z-index: 10;
+  }
+  #parent-btn:hover { opacity: 0.85; }
+
+  /* ── Math modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white; border-radius: 1.25rem;
+    padding: 2rem 2rem 1.75rem; min-width: 270px; text-align: center;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  }
+  .modal.shake { animation: mathShake 0.5s ease; }
+  @keyframes mathShake {
+    0%,100%{transform:translateX(0)} 20%{transform:translateX(-10px)}
+    40%{transform:translateX(10px)}  60%{transform:translateX(-7px)}
+    80%{transform:translateX(7px)}
+  }
+  .modal-label   { font-size:.7rem;font-weight:700;color:#aaa;letter-spacing:.07em;text-transform:uppercase;margin-bottom:.6rem; }
+  .modal-problem { font-size:2.25rem;font-weight:800;color:#1a1a1a;margin-bottom:1.25rem;letter-spacing:-.02em; }
+  .modal-input {
+    width:100%;border:2px solid #e0e0e0;border-radius:.75rem;
+    padding:.65rem 1rem;font-size:1.2rem;text-align:center;
+    outline:none;margin-bottom:.85rem;font-family:inherit;
+  }
+  .modal-input:focus { border-color:#4a9e6b; }
+  .modal-btn {
+    width:100%;background:#4a9e6b;color:white;border:none;
+    border-radius:.75rem;padding:.65rem;font-weight:700;
+    font-size:.95rem;cursor:pointer;font-family:inherit;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg id="blob-svg" viewBox="0 0 500 500"
+       style="width:min(70vw,70vh);height:min(70vw,70vh)">
+    <g id="wrapper">
+      <path id="green-blob" fill="#4caf50" opacity="0.85" />
+      <path id="yellow-blob" fill="#ffd54f" opacity="0.35"
+            style="transform-origin:250px 250px;transform:scale(0.38)" />
+    </g>
+  </svg>
+</div>
+
+<button id="stop-btn">stop</button>
+<button id="parent-btn">Parent view →</button>
+
+<!-- Math modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-label">Parent check</div>
+    <div class="modal-problem" id="modal-problem"></div>
+    <input class="modal-input" id="modal-input" type="number" placeholder="your answer" />
+    <button class="modal-btn" id="modal-go">Go</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+// ── Blob path generator ────────────────────────────────────────────────────────
+const W=500, H=500, CX=250, CY=250, BASE_R=130, VAR=18, N=14;
+
+function catmullToBezier(pts) {
+  const n = pts.length;
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i=0;i<n;i++) {
+    const p0=pts[(i-1+n)%n], p1=pts[i], p2=pts[(i+1)%n], p3=pts[(i+2)%n];
+    const cp1x=p1[0]+(p2[0]-p0[0])/6, cp1y=p1[1]+(p2[1]-p0[1])/6;
+    const cp2x=p2[0]-(p3[0]-p1[0])/6, cp2y=p2[1]-(p3[1]-p1[1])/6;
+    d+=` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`;
+  }
+  return d+' Z';
+}
+
+function blobPath(seed) {
+  const pts=[];
+  for (let i=0;i<N;i++) {
+    const angle=(i/N)*Math.PI*2 - Math.PI/2;
+    const wobble = Math.sin(seed+i*2.1)*VAR
+                 + Math.cos(seed*0.7+i*1.4)*VAR*0.4
+                 + Math.sin(seed*1.3+i*3.7)*VAR*0.25;
+    const r = BASE_R+wobble;
+    pts.push([CX+Math.cos(angle)*r, CY+Math.sin(angle)*r]);
+  }
+  return catmullToBezier(pts);
+}
+
+// ── State & refs ──────────────────────────────────────────────────────────────
+const greenEl  = document.getElementById('green-blob');
+const yellowEl = document.getElementById('yellow-blob');
+const wrapper  = document.getElementById('wrapper');
+let seed = 0;
+let state = 'idle';
+
+// ── Init paths ────────────────────────────────────────────────────────────────
+const initPath = blobPath(0);
+greenEl.setAttribute('d', initPath);
+yellowEl.setAttribute('d', initPath);
+
+// ── Morph loop ────────────────────────────────────────────────────────────────
+function morphBlob() {
+  seed += 0.6;
+  gsap.to(greenEl, {
+    attr: { d: blobPath(seed) },
+    duration: state==='agent_speaking' ? 0.4 : 2.5,
+    ease:     state==='agent_speaking' ? 'power2.inOut' : 'sine.inOut',
+    onComplete: morphBlob,
+  });
+}
+morphBlob();
+
+// ── Apply state ───────────────────────────────────────────────────────────────
+function applyState(s) {
+  state = s;
+  gsap.killTweensOf(wrapper);
+  gsap.killTweensOf(yellowEl);
+
+  if (s === 'agent_speaking') {
+    gsap.to(wrapper, { scale:1.22, transformOrigin:'50% 50%', duration:0.35,
+                       ease:'power2.out', yoyo:true, repeat:-1 });
+    gsap.to(yellowEl, { opacity:0, scale:0.3, duration:0.25 });
+
+  } else if (s === 'child_speaking') {
+    gsap.to(wrapper,  { scale:1, duration:0.3, ease:'power2.out' });
+    gsap.to(yellowEl, { opacity:1, scale:0.52, duration:0.3, ease:'back.out(1.2)' });
+
+  } else {
+    gsap.to(wrapper, { scale:1, transformOrigin:'50% 50%', duration:0.6, ease:'power2.out' });
+    gsap.to(wrapper, { scale:1.04, transformOrigin:'50% 50%', duration:3,
+                       ease:'sine.inOut', yoyo:true, repeat:-1, delay:0.6 });
+    gsap.to(yellowEl, { opacity:0.35, scale:0.38, duration:0.8, ease:'sine.inOut' });
+    gsap.to(yellowEl, { opacity:0.55, scale:0.42, duration:2.2,
+                        ease:'sine.inOut', yoyo:true, repeat:-1, delay:0.8 });
+  }
+}
+applyState('idle');
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+const WS_URL = (typeof NEXT_PUBLIC_WS_URL !== 'undefined' && NEXT_PUBLIC_WS_URL)
+  || `ws://${location.hostname}:8765`;
+
+const transcript = [];
+
+function connectWS() {
+  const ws = new WebSocket(WS_URL);
+  ws.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'state') applyState(msg.value);
+      if (msg.type === 'transcript') transcript.push({role:msg.role, content:msg.content});
+    } catch {}
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+connectWS();
+
+// ── Emergency stop ────────────────────────────────────────────────────────────
+document.getElementById('stop-btn').addEventListener('click', () => {
+  const text = transcript.map(t=>`${t.role.toUpperCase()}: ${t.content}`).join('\n');
+  try { new WebSocket(WS_URL).send(JSON.stringify({type:'emergency_stop'})); } catch {}
+  alert('Session stopped. Transcript has been saved.');
+});
+
+// ── Math toggle ───────────────────────────────────────────────────────────────
+let prob = {a:0, b:0};
+
+function newProblem() {
+  prob.a = Math.floor(Math.random()*9)+2;
+  prob.b = Math.floor(Math.random()*9)+2;
+  document.getElementById('modal-problem').textContent = `${prob.a} × ${prob.b} = ?`;
+  document.getElementById('modal-input').value = '';
+}
+
+document.getElementById('parent-btn').addEventListener('click', () => {
+  newProblem();
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-input').focus(), 50);
+});
+
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+function tryAnswer() {
+  const val = parseInt(document.getElementById('modal-input').value);
+  if (val === prob.a * prob.b) {
+    document.getElementById('modal-overlay').classList.remove('open');
+    window.location.href = 'index.html';
+  } else {
+    const m = document.getElementById('modal');
+    m.classList.remove('shake'); void m.offsetWidth; m.classList.add('shake');
+    setTimeout(() => { m.classList.remove('shake'); newProblem(); }, 550);
+  }
+}
+document.getElementById('modal-go').addEventListener('click', tryAnswer);
+document.getElementById('modal-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryAnswer();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lil-Vro — Parent Dashboard</title>
+<style>
+  :root {
+    --accent:   #4a9e6b;
+    --accent-light: #e8f5ee;
+    --bg:       #f5f3ee;
+    --surface:  #ffffff;
+    --border:   #e4e0d8;
+    --muted:    #8a8070;
+    --ink:      #1a1612;
+    --ink-soft: #3a3530;
+    --radius:   0.75rem;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--ink); min-height: 100vh; }
+
+  /* ── Header ── */
+  header {
+    position: sticky; top: 0; z-index: 40;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.9);
+    backdrop-filter: blur(10px);
+    padding: 0.75rem 1.5rem;
+  }
+  .header-inner { max-width: 72rem; margin: 0 auto;
+                  display: flex; align-items: center; justify-content: space-between; }
+  .logo { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; color: var(--ink); }
+  .logo-icon { width: 32px; height: 32px; border-radius: 8px; background: var(--accent);
+               display: flex; align-items: center; justify-content: center;
+               color: white; font-weight: 800; font-size: 0.85rem; }
+  .logo-name { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; }
+  .logo-sub  { font-size: 0.8rem; color: var(--muted); margin-left: 0.25rem; }
+  .synced-badge {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: rgba(255,255,255,0.8); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.3rem 0.8rem;
+    font-size: 0.78rem; color: var(--muted);
+  }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+              animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── Layout ── */
+  main { max-width: 72rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+  /* ── Page header ── */
+  .page-header { margin-bottom: 1.75rem; }
+  .eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+             text-transform: uppercase; color: var(--accent); margin-bottom: 0.3rem; }
+  .page-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; }
+  .page-desc  { font-size: 0.9rem; color: var(--muted); margin-top: 0.4rem; max-width: 52ch; }
+
+  /* ── Panel ── */
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.25rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  }
+
+  /* ── Stat cards ── */
+  .stat-grid { display: grid; gap: 1rem; grid-template-columns: repeat(2, 1fr); margin-bottom: 1.25rem; }
+  @media(min-width:700px){ .stat-grid { grid-template-columns: repeat(4,1fr); } }
+  .stat-card { padding: 1.1rem 1.25rem; }
+  .stat-label { font-size: 0.78rem; color: var(--muted); font-weight: 500; margin-bottom: 0.4rem; }
+  .stat-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
+  .stat-hint  { font-size: 0.72rem; color: var(--muted); margin-top: 0.3rem; }
+
+  /* ── Two-col grid ── */
+  .two-col { display: grid; gap: 1.25rem; margin-bottom: 1.25rem; }
+  @media(min-width:900px){ .two-col { grid-template-columns: 3fr 2fr; } }
+
+  /* ── Week chart ── */
+  .chart-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1rem; }
+  .chart-title  { font-size: 1.1rem; font-weight: 700; }
+  .chart-sub    { font-size: 0.78rem; color: var(--muted); }
+  .chart-bars   { display: flex; align-items: flex-end; gap: 0.4rem; height: 9rem; }
+  .bar-col      { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+  .bar-wrap     { height: 7rem; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+  .bar {
+    width: 100%; max-width: 2.25rem; border-radius: 4px 4px 0 0;
+    background: var(--accent); transition: height 0.6s ease;
+  }
+  .bar.empty { opacity: 0.2; }
+  .bar-label { font-size: 0.7rem; color: var(--muted); }
+
+  /* ── Mastery ── */
+  .mastery-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .mastery-title  { font-size: 1.1rem; font-weight: 700; }
+  .mastery-item   { margin-bottom: 1rem; }
+  .mastery-row    { display: flex; justify-content: space-between; margin-bottom: 0.3rem;
+                    font-size: 0.82rem; font-weight: 500; }
+  .mastery-pct    { color: var(--muted); }
+  .mastery-track  { height: 7px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .mastery-fill   { height: 100%; background: var(--accent); border-radius: 99px;
+                    width: 0; transition: width 0.8s ease; }
+
+  /* ── Sessions ── */
+  .sessions-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .sessions-title  { font-size: 1.1rem; font-weight: 700; }
+  .session-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.75rem 0; border-bottom: 1px solid var(--border);
+    gap: 1rem;
+  }
+  .session-row:last-child { border-bottom: none; }
+  .session-topic { font-size: 0.9rem; font-weight: 600; text-transform: capitalize; color: var(--ink-soft); }
+  .session-meta  { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
+  .mode-badge {
+    display: inline-block; border-radius: 4px;
+    padding: 0.15rem 0.45rem; font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.03em; text-transform: capitalize;
+  }
+  .mode-walkthrough { background: #dbeafe; color: #1d4ed8; }
+  .mode-practice    { background: #dcfce7; color: #166534; }
+  .mode-teach-back  { background: #fef3c7; color: #92400e; }
+  .session-date { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+
+  /* ── Math toggle button ── */
+  #toggle-btn {
+    position: fixed; bottom: 2rem; right: 1.5rem; z-index: 50;
+    background: var(--accent); color: white; border: none;
+    border-radius: 999px; padding: 0.6rem 1.3rem;
+    font-size: 0.8rem; font-weight: 700; cursor: pointer;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.15); letter-spacing: 0.02em;
+    transition: opacity 0.15s;
+  }
+  #toggle-btn:hover { opacity: 0.88; }
+
+  /* ── Math modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white; border-radius: 1.25rem;
+    padding: 2rem 2rem 1.75rem; min-width: 270px; text-align: center;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  }
+  .modal.shake { animation: mathShake 0.5s ease; }
+  @keyframes mathShake {
+    0%,100%{transform:translateX(0)} 20%{transform:translateX(-10px)}
+    40%{transform:translateX(10px)}  60%{transform:translateX(-7px)}
+    80%{transform:translateX(7px)}
+  }
+  .modal-label { font-size: 0.7rem; font-weight: 700; color: #aaa;
+                 letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 0.6rem; }
+  .modal-problem { font-size: 2.25rem; font-weight: 800; color: #1a1a1a;
+                   margin-bottom: 1.25rem; letter-spacing: -0.02em; }
+  .modal-input {
+    width: 100%; border: 2px solid #e0e0e0; border-radius: 0.75rem;
+    padding: 0.65rem 1rem; font-size: 1.2rem; text-align: center;
+    outline: none; margin-bottom: 0.85rem; font-family: inherit;
+  }
+  .modal-input:focus { border-color: var(--accent); }
+  .modal-btn {
+    width: 100%; background: var(--accent); color: white; border: none;
+    border-radius: 0.75rem; padding: 0.65rem; font-weight: 700;
+    font-size: 0.95rem; cursor: pointer; font-family: inherit;
+  }
+  .modal-btn:hover { opacity: 0.9; }
+
+  footer { max-width: 72rem; margin: 0 auto; padding: 0 1.5rem 2.5rem;
+           font-size: 0.8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="logo" href="index.html">
+      <div class="logo-icon">lv</div>
+      <span class="logo-name">Lil-Vro</span>
+      <span class="logo-sub">for parents</span>
+    </a>
+    <div class="synced-badge">
+      <span class="live-dot"></span>
+      Synced from study sessions
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="page-header">
+    <div class="eyebrow">Parent dashboard</div>
+    <h1 class="page-title">Alex's week</h1>
+    <p class="page-desc">Motivation, study time, and what they're getting more confident with — without interrupting the voice session.</p>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stat-grid">
+    <div class="panel stat-card">
+      <div class="stat-label">Current streak</div>
+      <div class="stat-value">7 days</div>
+      <div class="stat-hint">Best: 12 days</div>
+    </div>
+    <div class="panel stat-card">
+      <div class="stat-label">Sessions this week</div>
+      <div class="stat-value">5</div>
+      <div class="stat-hint">34 all time</div>
+    </div>
+    <div class="panel stat-card">
+      <div class="stat-label">Problems solved</div>
+      <div class="stat-value">23</div>
+      <div class="stat-hint">Top subject: algebra (12)</div>
+    </div>
+    <div class="panel stat-card">
+      <div class="stat-label">Study time</div>
+      <div class="stat-value">158 min</div>
+      <div class="stat-hint">Strongest: Fractions (82%)</div>
+    </div>
+  </div>
+
+  <!-- Chart + Mastery -->
+  <div class="two-col">
+    <div class="panel">
+      <div class="chart-header">
+        <span class="chart-title">This week</span>
+        <span class="chart-sub">Minutes studying</span>
+      </div>
+      <div class="chart-bars" id="chart"></div>
+    </div>
+    <div class="panel">
+      <div class="mastery-header">
+        <span class="mastery-title">Top topics</span>
+      </div>
+      <div id="mastery"></div>
+    </div>
+  </div>
+
+  <!-- Recent sessions -->
+  <div class="panel">
+    <div class="sessions-header">
+      <span class="sessions-title">Recent sessions</span>
+    </div>
+    <div id="sessions"></div>
+  </div>
+</main>
+
+<footer>Study sessions stay on your family's account. No kid-facing screen during tutoring with Lil-Vro.</footer>
+
+<!-- Child view toggle -->
+<button id="toggle-btn">Child view →</button>
+
+<!-- Math modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-label">Parent check</div>
+    <div class="modal-problem" id="modal-problem"></div>
+    <input class="modal-input" id="modal-input" type="number" placeholder="your answer" />
+    <button class="modal-btn" id="modal-go">Go</button>
+  </div>
+</div>
+
+<script>
+// ── Data ──────────────────────────────────────────────────────────────────────
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const today = new Date();
+
+function daysAgo(n, hour=16) {
+  const d = new Date(today);
+  d.setDate(d.getDate() - n);
+  d.setHours(hour, 30, 0, 0);
+  return d;
+}
+
+const sessions = [
+  { topic:'algebra',     mode:'walkthrough', seconds:1800, turns:24, date:daysAgo(0) },
+  { topic:'fractions',   mode:'practice',    seconds:1320, turns:18, date:daysAgo(1) },
+  { topic:'geometry',    mode:'teach-back',  seconds:2700, turns:31, date:daysAgo(2) },
+  { topic:'percentages', mode:'practice',    seconds:1080, turns:14, date:daysAgo(4) },
+  { topic:'algebra',     mode:'walkthrough', seconds:1680, turns:21, date:daysAgo(5) },
+];
+
+const mastery = [
+  { topic:'Fractions',   score:82 },
+  { topic:'Algebra',     score:74 },
+  { topic:'Geometry',    score:61 },
+  { topic:'Percentages', score:55 },
+  { topic:'Ratios',      score:48 },
+];
+
+function fmtDuration(s) {
+  const m = Math.round(s/60);
+  return m < 60 ? `${m} min` : `${Math.floor(m/60)}h ${m%60}m`;
+}
+
+// ── Week chart ────────────────────────────────────────────────────────────────
+function buildChart() {
+  const buckets = {};
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate()-i); d.setHours(0,0,0,0);
+    buckets[d.toDateString()] = 0;
+  }
+  sessions.forEach(s => {
+    const d = new Date(s.date); d.setHours(0,0,0,0);
+    if (buckets[d.toDateString()] !== undefined)
+      buckets[d.toDateString()] += Math.round(s.seconds/60);
+  });
+
+  const entries = Object.entries(buckets);
+  const maxVal  = Math.max(1, ...entries.map(([,v])=>v));
+  const el = document.getElementById('chart');
+  el.innerHTML = '';
+
+  entries.forEach(([dateStr, mins], i) => {
+    const d     = new Date(dateStr);
+    const label = DAYS[d.getDay()];
+    const h     = mins ? Math.max(12, Math.round((mins/maxVal)*112)) : 4;
+    el.innerHTML += `
+      <div class="bar-col">
+        <div class="bar-wrap">
+          <div class="bar${mins?'':' empty'}" style="height:${h}px" title="${mins} min" data-h="${h}"></div>
+        </div>
+        <span class="bar-label">${label}</span>
+      </div>`;
+  });
+
+  // Animate bars in
+  setTimeout(() => {
+    document.querySelectorAll('.bar').forEach((b,i) => {
+      b.style.height = '0px';
+      setTimeout(() => { b.style.height = b.dataset.h + 'px'; }, i*60);
+    });
+  }, 50);
+}
+
+// ── Mastery bars ──────────────────────────────────────────────────────────────
+function buildMastery() {
+  const el = document.getElementById('mastery');
+  el.innerHTML = mastery.map(m => `
+    <div class="mastery-item">
+      <div class="mastery-row">
+        <span>${m.topic}</span>
+        <span class="mastery-pct">${m.score}%</span>
+      </div>
+      <div class="mastery-track">
+        <div class="mastery-fill" data-pct="${m.score}"></div>
+      </div>
+    </div>`).join('');
+
+  setTimeout(() => {
+    document.querySelectorAll('.mastery-fill').forEach((f,i) => {
+      setTimeout(() => { f.style.width = f.dataset.pct + '%'; }, i*80);
+    });
+  }, 100);
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+function buildSessions() {
+  const el = document.getElementById('sessions');
+  el.innerHTML = sessions.map(s => `
+    <div class="session-row">
+      <div>
+        <div class="session-topic">${s.topic}</div>
+        <div class="session-meta">
+          <span class="mode-badge mode-${s.mode}">${s.mode}</span>
+          <span>${fmtDuration(s.seconds)}</span>
+          <span>·</span>
+          <span>${s.turns} turns</span>
+        </div>
+      </div>
+      <div class="session-date">${s.date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</div>
+    </div>`).join('');
+}
+
+buildChart(); buildMastery(); buildSessions();
+
+// ── Math toggle ───────────────────────────────────────────────────────────────
+let prob = {a:0,b:0};
+
+function newProblem() {
+  prob.a = Math.floor(Math.random()*9)+2;
+  prob.b = Math.floor(Math.random()*9)+2;
+  document.getElementById('modal-problem').textContent = `${prob.a} × ${prob.b} = ?`;
+  document.getElementById('modal-input').value = '';
+}
+
+document.getElementById('toggle-btn').addEventListener('click', () => {
+  newProblem();
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-input').focus(), 50);
+});
+
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+function tryAnswer() {
+  const val = parseInt(document.getElementById('modal-input').value);
+  if (val === prob.a * prob.b) {
+    document.getElementById('modal-overlay').classList.remove('open');
+    window.location.href = 'child.html';
+  } else {
+    const m = document.getElementById('modal');
+    m.classList.remove('shake');
+    void m.offsetWidth;
+    m.classList.add('shake');
+    setTimeout(() => { m.classList.remove('shake'); newProblem(); }, 550);
+  }
+}
+
+document.getElementById('modal-go').addEventListener('click', tryAnswer);
+document.getElementById('modal-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryAnswer();
+});
+</script>
+</body>
+</html>
