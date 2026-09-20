@@ -95,11 +95,49 @@ _busy = False  # True while agent/TTS is running — ignore new triggers
 _last_spoken_user = ""
 _speaking = False      # True while TTS audio is actively playing
 _speak_end_time = 0.0  # monotonic timestamp when last TTS finished
+_exiting = False       # Set to True by _end_session() to trigger clean shutdown
 
 
 # ------------------------------------------------------------------ #
 #  Pause / resume — press P in terminal or say "pause" / "resume"
 # ------------------------------------------------------------------ #
+
+_BYE_PHRASES = [
+    "bye", "goodbye", "good bye", "see you", "see ya", "later",
+    "i have to go", "i gotta go", "i got to go", "i need to go",
+    "i'm done", "i am done", "that's all", "that is all",
+    "i'm leaving", "i am leaving", "got to go now", "gotta go now",
+    "talk later", "talk to you later", "ttyl", "have to go now",
+    "i'm finished", "i am finished", "end session", "stop session",
+]
+
+
+def _end_session():
+    """Say goodbye, print stats, and trigger clean shutdown."""
+    global _exiting
+    _exiting = True
+    psummary = counter.summary()
+    msummary = stats.summary()
+    subjects_str = (
+        "  ".join(f"{s}:{n}" for s, n in psummary["by_subject"].items())
+        if psummary["by_subject"] else "none"
+    )
+    print(
+        f"\n  [session ended — {msummary['utterances']} turns, "
+        f"{msummary['elapsed_min']} min | "
+        f"solved: {psummary['total_solved']} ({subjects_str}) | "
+        f"mood: {msummary['dominant_mood']}]"
+    )
+    farewell = (
+        "See you next time! You did good work today."
+        if psummary["total_solved"] > 0
+        else "See you next time! Keep practising."
+    )
+    ding()
+    speak(farewell)
+    store.end_session()
+    raise SystemExit(0)
+
 
 def _toggle_pause():
     global _paused
@@ -115,6 +153,8 @@ def _keyboard_watcher():
             ch = msvcrt.getwch()
             if ch.lower() == "p":
                 _toggle_pause()
+            elif ch.lower() == "b":
+                _end_session()
             elif ch == "\x03":
                 return
 
@@ -134,6 +174,8 @@ def _keyboard_watcher():
                 ch = tty_fd.read(1).decode("utf-8", errors="ignore")
                 if ch.lower() == "p":
                     _toggle_pause()
+                elif ch.lower() == "b":
+                    _end_session()
                 elif ch == "\x03":
                     raise KeyboardInterrupt
     except Exception:
@@ -255,6 +297,11 @@ def on_transcript(text: str):
             _toggle_pause()
         return
 
+    # Voice-triggered goodbye
+    if any(p in lower for p in _BYE_PHRASES):
+        _end_session()
+        return
+
     if _paused:
         print(f"\r  [paused — press p or say 'resume']          ", end="", flush=True)
         return
@@ -354,6 +401,7 @@ if __name__ == "__main__":
     print("lilvro — voice STEM agent")
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
     print("Pause: press p  or say 'pause lilvro' / 'resume'")
+    print("End:   press b  or say 'bye' / 'I have to go'")
     print("I only answer after you finish speaking.")
     if store.enabled:
         print(f"Session store: on (child {store.child_id[:8]}…)")
@@ -378,16 +426,17 @@ if __name__ == "__main__":
         while True:
             # recorder.text blocks until a silence-delimited utterance.
             recorder.text(on_transcript)
-    except KeyboardInterrupt:
-        summary = stats.summary()
-        psummary = counter.summary()
-        subjects_str = (
-            "  ".join(f"{s}:{n}" for s, n in psummary["by_subject"].items())
-            if psummary["by_subject"] else "none"
-        )
-        print(f"\nGoodbye!  Session: {summary['utterances']} turns, "
-              f"{summary['elapsed_min']} min, "
-              f"dominant mood: {summary['dominant_mood']} | "
-              f"problems solved: {psummary['total_solved']} ({subjects_str})")
-        store.end_session()
+    except (KeyboardInterrupt, SystemExit):
+        if not _exiting:  # Ctrl+C path — _end_session() already handles the other path
+            summary = stats.summary()
+            psummary = counter.summary()
+            subjects_str = (
+                "  ".join(f"{s}:{n}" for s, n in psummary["by_subject"].items())
+                if psummary["by_subject"] else "none"
+            )
+            print(f"\nGoodbye!  Session: {summary['utterances']} turns, "
+                  f"{summary['elapsed_min']} min, "
+                  f"dominant mood: {summary['dominant_mood']} | "
+                  f"problems solved: {psummary['total_solved']} ({subjects_str})")
+            store.end_session()
         recorder.stop()
