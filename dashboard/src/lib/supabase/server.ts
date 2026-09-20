@@ -1,10 +1,18 @@
+import { makeSupabaseStub } from "./stub";
+
+// Supabase disabled — returns a no-op stub so all pages render without a DB.
+// To re-enable: comment the stub line, uncomment the block below, and set env vars.
+export async function createClient() {
+  return makeSupabaseStub();
+}
+
+/*
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "@/types/database";
 
 export async function createClient() {
   const cookieStore = await cookies();
-
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://placeholder.supabase.co",
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "placeholder-anon-key",
@@ -26,3 +34,4 @@ export async function createClient() {
     },
   );
 }
+*/
