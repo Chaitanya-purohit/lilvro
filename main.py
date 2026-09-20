@@ -48,7 +48,8 @@ load_dotenv()
 # ------------------------------------------------------------------ #
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-TTS_URL = "https://api.deepgram.com/v1/speak?model=aura-asteria-en&encoding=linear16&sample_rate=24000&channels=1"
+DEEPGRAM_VOICE = os.getenv("DEEPGRAM_VOICE", "aura-2-thalia-en")
+TTS_URL = f"https://api.deepgram.com/v1/speak?model={DEEPGRAM_VOICE}&encoding=linear16&sample_rate=24000&channels=1"
 
 # How long after speech stops before we treat the utterance as finished.
 # Kids often pause mid-thought — keep this a bit generous.
