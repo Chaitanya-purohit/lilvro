@@ -44,6 +44,7 @@ from session_store import SessionStore
 from chem_normalizer import normalize as chem_normalize, render as chem_render
 from content_filter import filter_response
 from mood_tracker import SessionStats
+from problem_counter import ProblemCounter
 
 load_dotenv()
 
@@ -83,6 +84,7 @@ history = []
 mode = "walkthrough"
 _paused = False
 stats = SessionStats()
+counter = ProblemCounter()
 gate = UtteranceGate(
     settle_seconds=0.5,
     min_chars=2,
@@ -327,6 +329,14 @@ def on_transcript(text: str):
             return
 
         print(f"\r< {speakable}          ")
+
+        # Problem counter — check if agent just confirmed a correct answer
+        solved_subject = counter.check_and_record(final_text, response_text)
+        if solved_subject:
+            summary = counter.by_subject
+            subjects_str = "  ".join(f"{s}:{n}" for s, n in summary.items())
+            print(f"  [solved #{counter.total} — {solved_subject} | session: {subjects_str}]")
+
         store.record_turn(role="user", content=final_text, mode=mode)
         store.record_turn(role="assistant", content=speakable, mode=mode)
         ding()
@@ -370,8 +380,14 @@ if __name__ == "__main__":
             recorder.text(on_transcript)
     except KeyboardInterrupt:
         summary = stats.summary()
+        psummary = counter.summary()
+        subjects_str = (
+            "  ".join(f"{s}:{n}" for s, n in psummary["by_subject"].items())
+            if psummary["by_subject"] else "none"
+        )
         print(f"\nGoodbye!  Session: {summary['utterances']} turns, "
               f"{summary['elapsed_min']} min, "
-              f"dominant mood: {summary['dominant_mood']}")
+              f"dominant mood: {summary['dominant_mood']} | "
+              f"problems solved: {psummary['total_solved']} ({subjects_str})")
         store.end_session()
         recorder.stop()
