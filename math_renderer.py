@@ -87,6 +87,9 @@ def _normalize_superscripts(text: str) -> str:
 
 
 def _replace_structured_notation(text: str) -> str:
+	# Space between coefficient and variable: 2x → 2 x, 3y² → 3 y², etc.
+	# Exclude scientific notation: 3.14e10 stays intact.
+	text = re.sub(r"(?<=[0-9])(?=[A-DF-Za-df-z]|[Ee](?![0-9+-]))", " ", text)
 	text = re.sub(
 		r"d\^\s*2\s*([A-Za-z])\s*/\s*d([A-Za-z])\^\s*2",
 		r"the second derivative of \1 with respect to \2",

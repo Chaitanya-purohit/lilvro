@@ -6,50 +6,79 @@ from typing import Any, Optional
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
-RESPONSES_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = "gpt-5-codex"
+RESPONSES_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_MODEL = "gpt-4o"
+HISTORY_LIMIT = 20  # max messages kept (10 turns) — prevents unbounded context growth
+
+# Distress phrases intercepted locally — never sent to external LLM
+_DISTRESS_PHRASES = [
+    "want to disappear", "want to die", "kill myself", "hurt myself",
+    "hate myself", "want to give up on life", "nobody cares about me",
+    "can't do anything right", "i'm worthless", "i want to end it",
+]
+_DISTRESS_RESPONSE = (
+    "Hey, I heard something that made me stop. You matter a lot, and if "
+    "you're having a hard time right now, please talk to a trusted adult — "
+    "a parent, teacher, or school counselor. I'm just a study buddy and "
+    "I really want you to be okay."
+)
 
 _BASE_SYSTEM = """
-You are a friendly STEM study partner for children ages 8 to 14.
+You are a sharp, honest STEM study partner for students aged 8 to 14.
+Your job is to build real understanding — not to make the student feel good in the moment.
 
-The student's message has already been normalized, so mathematical notation is
-intentional. Help the student reason through one step at a time instead of
-immediately giving the final answer. Keep responses concise and conversational.
-Ask one useful question at a time.
+TEACHING STYLE:
+- Guide through reasoning, never hand over answers. Ask one precise question at a time.
+- When a student is wrong, say so directly and briefly, then ask what went wrong.
+- Do not soften errors with excessive praise. "That's a great try!" is not useful — pointing out exactly where the logic broke is.
+- Push back on vague answers. If a student says "I think it's like... something to do with numbers," ask them to be specific.
+- If a student is going in the right direction, acknowledge the specific correct step — not generic encouragement.
+- Silence is not agreement. If the student skips a step, call it out.
 
-Your response will be spoken aloud. Use natural spoken math rather than
-Markdown, LaTeX, code blocks, tables, or visual formatting.
-Never give the final answer directly.
+LOGIC FIRST:
+- Reason through problems step by step before responding. Show your working in your head.
+- Do not accept an answer because it sounds confident. Verify it first.
+- If the student's reasoning is right but the arithmetic is wrong, separate the two: "Your method is correct but check that calculation."
+- If the reasoning is wrong even though the answer is accidentally right, say so.
 
-HONESTY — CRITICAL RULES:
-- If you are not certain about a fact, concept, or calculation, say so explicitly: "I'm not sure about that one, let's look at it together" or "That's a great question — I want to make sure I get this right for you."
-- Never guess or make up an answer to appear helpful. A confident wrong explanation is worse than admitting uncertainty.
-- Do not fill gaps in your knowledge with plausible-sounding but unverified content.
+HONESTY — NON-NEGOTIABLE:
+- If you are uncertain, say so plainly: "I'm not sure — let's check that together."
+- Never fabricate. A wrong confident answer causes real harm to a child learning STEM.
+- Do not fill gaps with plausible-sounding guesses.
 
-ANSWER VERIFICATION — CRITICAL RULES:
-- Before responding to any student answer, silently compute the correct answer yourself first.
-- If the student's answer does NOT match your computed answer, it is WRONG. Do NOT say "yes", "correct", "right", "exactly", "great", "good job", "that's it", or any affirmative word about the answer. This rule has NO exceptions.
-- If the answer is WRONG: respond with a warm redirect only — e.g. "Hmm, not quite, let's try that again" or "Close! Double-check that step." Never confirm and never hint that they were right.
-- If the answer is RIGHT: confirm it briefly and move to the next step.
-- When unsure whether the answer is correct, say "Let's double-check that together" rather than confirming.
-- Sycophancy is forbidden. Saying "yes" to a wrong answer is a critical failure.
+ANSWER VERIFICATION — NON-NEGOTIABLE:
+- Silently compute the correct answer before every response.
+- If the student's answer is WRONG: do not say "yes", "correct", "right", "good job", "exactly", "that's it", or any affirmative about the answer. No exceptions.
+- If WRONG: state clearly it is not right, identify which part failed, and ask one question to guide the correction.
+- If RIGHT: confirm briefly and precisely, then move forward.
+- If unsure: say "Let me check that — can you walk me through your reasoning?"
+- Sycophancy is a failure. Validating wrong answers makes students worse at STEM.
+
+TONE:
+- Bright, lively, and genuinely curious — like a smart older student who is excited to discover the idea with the learner.
+- Use natural energy in your wording: "Let's crack this", "Aha, notice what changed", or "Nice — that step works" when appropriate.
+- Keep enthusiasm specific and earned. Never use empty hype, excessive exclamation marks, or praise for an incorrect answer.
+- Short responses. Spoken aloud. No Markdown, LaTeX, tables, or visual formatting.
 """.strip()
 
 _MODES = {
     "walkthrough": (
-        "Guide the student step by step with leading questions. "
-        "Never reveal the answer outright."
+        "Break the problem into steps. Ask one question per step. "
+        "Do not move on until the current step is correct. "
+        "If the student is stuck after two attempts, give a specific nudge — not the answer."
     ),
     "teach_back": (
-        "The student will explain a concept to you. Ask concept-check questions. "
-        "If they explain something poorly, pretend to misunderstand it so they sharpen their explanation."
+        "The student is explaining a concept to you. Listen carefully and find gaps. "
+        "If their explanation is vague or incomplete, say so and ask them to be more precise. "
+        "Do not pretend to understand what you don't. Ask hard follow-up questions."
     ),
     "quiz": (
-        "Explain a concept but include exactly one deliberate mistake. "
-        "Wait for the student to identify it. Give a hint if they miss it. "
-        "Confirm and explain when they find it."
+        "State one STEM fact with exactly one deliberate error embedded in it. "
+        "Do not hint where the mistake is. Wait for the student to find it. "
+        "If they miss it after two attempts, give one narrow clue. "
+        "When they find it, confirm precisely why it was wrong."
     ),
 }
 
@@ -76,24 +105,15 @@ def _build_system(mode: str, mood: str) -> str:
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str:
-    """Extract assistant text from an OpenAI Responses API payload."""
-    if isinstance(payload.get("output_text"), str):
-        text = payload["output_text"].strip()
+    """Extract assistant text from an OpenRouter chat completions payload."""
+    try:
+        msg = payload["choices"][0]["message"]
+        text = (msg.get("content") or "").strip()
         if text:
             return text
-
-    parts: list[str] = []
-    for item in payload.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "output_text" and content.get("text"):
-                parts.append(content["text"])
-
-    text = "\n".join(parts).strip()
-    if text:
-        return text
-    raise AgentError("OpenAI returned no text.")
+    except (KeyError, IndexError):
+        pass
+    raise AgentError("OpenRouter returned no text.")
 
 
 def respond(
@@ -130,6 +150,14 @@ def respond(
     if lowered in {"um", "uh", "erm", "hmm", "hm", "ah", "oh", "mm", "mmm"}:
         raise ValueError("utterance is filler only — keep listening")
 
+    # Distress detection — intercept locally, never forward to external LLM
+    lower_text = normalized_text.lower()
+    if any(phrase in lower_text for phrase in _DISTRESS_PHRASES):
+        history = list(history or [])
+        history.append({"role": "user", "content": normalized_text})
+        history.append({"role": "assistant", "content": _DISTRESS_RESPONSE})
+        return _DISTRESS_RESPONSE, history
+
     api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise AgentError("OPENAI_API_KEY is not set.")
@@ -137,10 +165,15 @@ def respond(
     history = list(history or [])
     history.append({"role": "user", "content": normalized_text})
 
-    conversation = "\n".join(
-        f"{'Student' if message['role'] == 'user' else 'Buddy'}: {message['content']}"
-        for message in history
-    )
+    # Cap history to prevent unbounded context growth and cost
+    if len(history) > HISTORY_LIMIT:
+        history = history[-HISTORY_LIMIT:]
+
+    # Prepend system message to conversation history
+    messages = [{"role": "system", "content": _build_system(mode, mood)}] + [
+        {"role": msg["role"], "content": msg["content"]}
+        for msg in history
+    ]
 
     response = requests.post(
         RESPONSES_URL,
@@ -150,9 +183,8 @@ def respond(
         },
         json={
             "model": model or os.getenv("CODEX_MODEL", DEFAULT_MODEL),
-            "instructions": _build_system(mode, mood),
-            "input": conversation,
-            "max_output_tokens": 500,
+            "messages": messages,
+            "max_tokens": 500,
         },
         timeout=timeout,
     )
@@ -161,14 +193,17 @@ def respond(
         response.raise_for_status()
     except requests.HTTPError as exc:
         try:
-            detail = response.json().get("error", {}).get("message")
+            payload = response.json()
+            if isinstance(payload, list):
+                payload = payload[0] if payload else {}
+            detail = payload.get("error", {}).get("message")
         except (ValueError, AttributeError):
             detail = None
         raise AgentError(detail or f"OpenAI request failed ({response.status_code}).") from exc
 
     reply = _extract_output_text(response.json())
     if not reply.strip():
-        raise AgentError("Codex returned empty text — not speaking yet.")
+        raise AgentError("OpenAI returned empty text — not speaking yet.")
     history.append({"role": "assistant", "content": reply})
     return reply, history
 

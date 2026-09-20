@@ -10,6 +10,9 @@ not on interim text, fillers, or mid-sentence cuts.
 """
 
 import os
+import sys
+import select
+import threading
 import warnings
 import logging
 import tempfile
@@ -18,6 +21,12 @@ import subprocess
 import time
 import requests
 from dotenv import load_dotenv
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import termios
+    import tty
 
 # Suppress model loading noise
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
@@ -30,6 +39,7 @@ from speech_normalizer import normalize
 from math_renderer import render_math
 from agent import respond, detect_mode
 from utterance_gate import GateDecision, UtteranceGate
+from speech_styler import style_speech
 
 load_dotenv()
 
@@ -38,7 +48,8 @@ load_dotenv()
 # ------------------------------------------------------------------ #
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-TTS_URL = "https://api.deepgram.com/v1/speak?model=aura-asteria-en&encoding=linear16&sample_rate=24000&channels=1"
+DEEPGRAM_VOICE = os.getenv("DEEPGRAM_VOICE", "aura-2-thalia-en")
+TTS_URL = f"https://api.deepgram.com/v1/speak?model={DEEPGRAM_VOICE}&encoding=linear16&sample_rate=24000&channels=1"
 
 # How long after speech stops before we treat the utterance as finished.
 # Kids often pause mid-thought — keep this a bit generous.
@@ -50,6 +61,7 @@ POST_SPEECH_SILENCE = 1.4
 
 history = []
 mode = "walkthrough"
+_paused = False
 gate = UtteranceGate(
     settle_seconds=0.5,
     min_chars=2,
@@ -61,8 +73,67 @@ _last_spoken_user = ""
 
 
 # ------------------------------------------------------------------ #
-#  TTS — Deepgram Aura (afplay avoids CoreAudio conflict with the mic)
+#  Pause / resume — press P in terminal or say "pause" / "resume"
 # ------------------------------------------------------------------ #
+
+def _toggle_pause():
+    global _paused
+    _paused = not _paused
+    status = "PAUSED  (press p or say 'resume' to continue)" if _paused else "RESUMED"
+    print(f"\n  [{status}]          ")
+
+
+def _keyboard_watcher():
+    """Background thread: press 'p' to toggle pause without killing the process."""
+    if os.name == "nt":
+        while True:
+            ch = msvcrt.getwch()
+            if ch.lower() == "p":
+                _toggle_pause()
+            elif ch == "\x03":
+                return
+
+    # Open /dev/tty directly so we don't compete with RealtimeSTT's stdin handling.
+    try:
+        tty_fd = open("/dev/tty", "rb", buffering=0)
+    except OSError:
+        return  # no controlling terminal — skip keyboard watcher silently
+
+    old = termios.tcgetattr(tty_fd)
+    try:
+        tty.setcbreak(tty_fd)
+        while True:
+            # Non-blocking poll — returns immediately if no key pressed
+            ready, _, _ = select.select([tty_fd], [], [], 0.05)
+            if ready:
+                ch = tty_fd.read(1).decode("utf-8", errors="ignore")
+                if ch.lower() == "p":
+                    _toggle_pause()
+                elif ch == "\x03":
+                    raise KeyboardInterrupt
+    except Exception:
+        pass
+    finally:
+        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old)
+        tty_fd.close()
+
+
+#  TTS — Deepgram Aura
+# ------------------------------------------------------------------ #
+
+_DING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds", "ding.mp3")
+
+def ding():
+    """Play a short chime to signal lilvro is about to speak."""
+    if sys.platform == "win32":
+        import winsound
+
+        winsound.PlaySound(_DING, winsound.SND_FILENAME)
+    elif sys.platform == "darwin":
+        subprocess.run(["afplay", _DING], check=False)
+    else:
+        subprocess.run(["aplay", _DING], check=False)
+
 
 def speak(text: str):
     """Send text to Deepgram Aura TTS and play audio through speaker.
@@ -87,10 +158,22 @@ def speak(text: str):
                 wf.setsampwidth(2)
                 wf.setframerate(24000)
                 wf.writeframes(response.content)
-        subprocess.run(["afplay", tmp], check=True)
-        os.unlink(tmp)
+        if sys.platform == "win32":
+            import winsound
+
+            winsound.PlaySound(tmp, winsound.SND_FILENAME)
+        elif sys.platform == "darwin":
+            subprocess.run(["afplay", tmp], check=True)
+        else:
+            subprocess.run(["aplay", tmp], check=True)
     except Exception as e:
         print(f"  [TTS error: {e}]")
+    finally:
+        if "tmp" in locals():
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 # ------------------------------------------------------------------ #
@@ -100,7 +183,7 @@ def speak(text: str):
 def on_partial(text: str):
     """Realtime stabilized text: show what we heard, do not answer yet."""
     text = (text or "").strip()
-    if not text or _busy:
+    if not text or _busy or _paused:
         return
     gate.feed(text, speech_ended=False, is_interim=True)
     print(f"\r  … {text}          ", end="", flush=True)
@@ -112,13 +195,28 @@ def on_partial(text: str):
 
 def on_transcript(text: str):
     """Called when STT thinks speech ended. Gate may still WAIT/IGNORE."""
-    global history, mode, _busy, _last_spoken_user
+    global history, mode, _busy, _last_spoken_user, _paused
 
     if _busy:
         return
 
     text = (text or "").strip()
     if not text:
+        return
+
+    # Voice-activated pause / resume
+    lower = text.lower()
+    if any(p in lower for p in ["pause lilvro", "stop listening", "go to sleep"]):
+        if not _paused:
+            _toggle_pause()
+        return
+    if any(p in lower for p in ["resume", "wake up", "start listening"]):
+        if _paused:
+            _toggle_pause()
+        return
+
+    if _paused:
+        print(f"\r  [paused — press p or say 'resume']          ", end="", flush=True)
         return
 
     result = gate.feed(text, speech_ended=True, is_interim=False)
@@ -172,12 +270,13 @@ def on_transcript(text: str):
             print("\r  [empty agent reply — staying quiet]")
             return
 
-        speakable = render_math(response_text).strip()
+        speakable = style_speech(render_math(response_text)).strip()
         if not speakable:
             print("\r  [nothing to speak]")
             return
 
         print(f"\r< {speakable}          ")
+        ding()
         speak(speakable)
     finally:
         _busy = False
@@ -191,8 +290,11 @@ def on_transcript(text: str):
 if __name__ == "__main__":
     print("lilvro — voice STEM agent")
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
+    print("Pause: press p  or say 'pause lilvro' / 'resume'")
     print("I only answer after you finish speaking.")
     print("Press Ctrl+C to quit\n")
+
+    threading.Thread(target=_keyboard_watcher, daemon=True).start()
 
     recorder = AudioToTextRecorder(
         model="tiny.en",

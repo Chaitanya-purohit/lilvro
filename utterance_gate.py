@@ -17,7 +17,7 @@ class GateDecision(str, Enum):
     IGNORE = "ignore"  # noise/filler — do not reply, keep listening
 
 
-@dataclass(slots=True)
+@dataclass
 class GateResult:
     decision: GateDecision
     text: str = ""
