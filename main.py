@@ -10,6 +10,10 @@ not on interim text, fillers, or mid-sentence cuts.
 """
 
 import os
+import sys
+import tty
+import termios
+import threading
 import warnings
 import logging
 import tempfile
@@ -50,6 +54,7 @@ POST_SPEECH_SILENCE = 1.4
 
 history = []
 mode = "walkthrough"
+_paused = False
 gate = UtteranceGate(
     settle_seconds=0.5,
     min_chars=2,
@@ -58,6 +63,35 @@ gate = UtteranceGate(
 )
 _busy = False  # True while agent/TTS is running — ignore new triggers
 _last_spoken_user = ""
+
+
+# ------------------------------------------------------------------ #
+#  Pause / resume — press P in terminal or say "pause" / "resume"
+# ------------------------------------------------------------------ #
+
+def _toggle_pause():
+    global _paused
+    _paused = not _paused
+    status = "PAUSED  (press p or say 'resume' to continue)" if _paused else "RESUMED"
+    print(f"\n  [{status}]          ")
+
+
+def _keyboard_watcher():
+    """Background thread: press 'p' to toggle pause without killing the process."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch.lower() == "p":
+                _toggle_pause()
+            elif ch == "\x03":  # Ctrl+C forwarded to main thread via KeyboardInterrupt
+                raise KeyboardInterrupt
+    except Exception:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 # ------------------------------------------------------------------ #
@@ -100,7 +134,7 @@ def speak(text: str):
 def on_partial(text: str):
     """Realtime stabilized text: show what we heard, do not answer yet."""
     text = (text or "").strip()
-    if not text or _busy:
+    if not text or _busy or _paused:
         return
     gate.feed(text, speech_ended=False, is_interim=True)
     print(f"\r  … {text}          ", end="", flush=True)
@@ -112,13 +146,28 @@ def on_partial(text: str):
 
 def on_transcript(text: str):
     """Called when STT thinks speech ended. Gate may still WAIT/IGNORE."""
-    global history, mode, _busy, _last_spoken_user
+    global history, mode, _busy, _last_spoken_user, _paused
 
     if _busy:
         return
 
     text = (text or "").strip()
     if not text:
+        return
+
+    # Voice-activated pause / resume
+    lower = text.lower()
+    if any(p in lower for p in ["pause lilvro", "stop listening", "go to sleep"]):
+        if not _paused:
+            _toggle_pause()
+        return
+    if any(p in lower for p in ["resume", "wake up", "start listening"]):
+        if _paused:
+            _toggle_pause()
+        return
+
+    if _paused:
+        print(f"\r  [paused — press p or say 'resume']          ", end="", flush=True)
         return
 
     result = gate.feed(text, speech_ended=True, is_interim=False)
@@ -191,8 +240,11 @@ def on_transcript(text: str):
 if __name__ == "__main__":
     print("lilvro — voice STEM agent")
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
+    print("Pause: press p  or say 'pause lilvro' / 'resume'")
     print("I only answer after you finish speaking.")
     print("Press Ctrl+C to quit\n")
+
+    threading.Thread(target=_keyboard_watcher, daemon=True).start()
 
     recorder = AudioToTextRecorder(
         model="tiny.en",
