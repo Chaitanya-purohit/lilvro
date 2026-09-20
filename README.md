@@ -10,7 +10,7 @@ Built at **HackMIT**. <!-- TODO: add Devpost link + demo video link -->
 
 ---
 
-## Why we built it
+## Inspiration
 
 Kids with a chatbot tend to copy answers. Kids who talk a problem through actually learn it. Lil-Vro is designed around that: it acts like a slightly older classmate, asks one leading question at a time, and makes the child do the thinking.
 
@@ -230,7 +230,39 @@ On the `socrates-bot` branch: `box3_audio_server.py` (BOX-3 audio transport) and
 
 ---
 
-## Roadmap
+## Challenges we ran into
+
+- **CoreAudio conflict** — `sounddevice.play()` crashed while the mic was open. Fixed by writing TTS audio to a temp WAV and playing via `afplay`.
+- **Pause key interference** — `sys.stdin.read(1)` competed with RealtimeSTT's terminal handling, causing missed keypresses. Fixed by opening `/dev/tty` directly and polling with `select.select`.
+- **Unicode superscripts** — "5²" was being read as "52". Fixed with a translation table that converts ² → `^2` before the exponent handler fires.
+- **Echo loop** — the mic picked up TTS audio and sent it back to the agent. Fixed with a `_speaking` flag and a 1.2-second cooldown after playback ends.
+- **Overly agreeable agent** — early versions validated wrong answers with soft language. Rewrote the system prompt to explicitly prohibit any affirmative on incorrect answers.
+- **Spoken chemistry parsing** — "water reacts with carbon dioxide" needs to become H₂O + CO₂ for the LLM, then back to English for TTS. Built a 143-entry bidirectional lexicon to handle both directions cleanly.
+
+---
+
+## Accomplishments we're proud of
+
+- Full end-to-end voice pipeline with no screen required
+- Bidirectional math and chemistry — spoken input, spoken output, with a 99-entry math lexicon and 143-entry chemistry lexicon
+- An agent that genuinely pushes back and builds understanding rather than just answering
+- Mood-adaptive teaching that requires zero manual input — the agent detects frustration and adjusts automatically
+- All safety features (distress detection, content filter) intercept locally before any external API call
+- A working ESP32-S3-BOX-3 hardware prototype that makes Lil-Vro a standalone device
+
+---
+
+## What we learned
+
+- Voice UX is unforgiving — latency, echo, and false triggers feel much worse in audio than in text
+- Kids need an AI that respects their intelligence, not one that cheerleads every answer
+- `select.select` + `/dev/tty` is the right way to do non-blocking keyboard input when another library owns stdin
+- Bidirectional symbol conversion is harder than it looks — every term needs to work going in *and* coming out
+- The best safety feature is a well-designed system prompt, not just a word filter
+
+---
+
+## What's next
 
 - Make the BOX-3 fully standalone, with on-device wake word and fewer laptop dependencies.
 - More Mistake Mode topic packs (fractions, derivatives, chemistry) and a difficulty ramp.
