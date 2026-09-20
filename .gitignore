@@ -6,3 +6,10 @@ __pycache__/
 .venv/
 realtimesst.log
 *.log
+
+# Nested clones + Next build output
+lilvro/
+lilvro-1/
+dashboard/.next-dev/
+dashboard/.next/
+dashboard/node_modules/
