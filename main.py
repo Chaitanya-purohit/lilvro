@@ -98,7 +98,7 @@ def _keyboard_watcher():
 #  TTS — Deepgram Aura (afplay avoids CoreAudio conflict with the mic)
 # ------------------------------------------------------------------ #
 
-_DING = "/System/Library/Sounds/Tink.aiff"
+_DING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds", "ding.mp3")
 
 def ding():
     """Play a short chime to signal lilvro is about to speak."""
