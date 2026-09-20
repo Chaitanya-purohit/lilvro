@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -34,16 +35,22 @@ export default function LoginPage() {
       />
       <div className="page-enter relative panel shadow-[var(--shadow)]">
         <div className="mb-6 flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--accent)] text-sm font-bold text-white">
-            lv
-          </span>
+          <Image
+            src="/lilvro-icon.png"
+            alt="Lil-Vro"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-xl shadow-sm"
+            priority
+          />
           <div>
             <p className="text-sm font-medium text-[var(--muted)]">Parent access</p>
-            <h1 className="display text-3xl tracking-tight">lilvro</h1>
+            <h1 className="display text-3xl tracking-tight">Lil-Vro</h1>
           </div>
         </div>
         <p className="text-[var(--muted)] leading-relaxed">
-          See streaks, study time, and mastery while your child learns by voice — no screen during the session.
+          See streaks, study time, and mastery while your child learns by voice with Lil-Vro —
+          no screen during the session.
         </p>
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           <label className="block text-sm font-medium">

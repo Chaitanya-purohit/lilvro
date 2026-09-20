@@ -17,3 +17,6 @@ dashboard/node_modules/
 # Supabase CLI local state
 supabase/.temp/
 supabase/.branches/
+
+# Local supabase CLI home (used when HOME is overridden)
+.supabase_home/

@@ -1,4 +1,9 @@
-# lilvro parent dashboard
+# Lil-Vro parent dashboard
+
+Next.js app for parents to review voice STEM sessions.
+
+Demo login: `parent@lilvro.local` / `password123`  
+Seeded children: **Alex** (primary `CHILD_ID`) and **Sam**.
 
 Next.js app for parents — overview, activity, mastery, and children. Designed to run
 against **local Supabase** now and **hosted Supabase + Vercel** later (same code).

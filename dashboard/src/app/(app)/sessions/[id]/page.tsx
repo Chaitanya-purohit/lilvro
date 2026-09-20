@@ -69,7 +69,7 @@ export default async function SessionDetailPage({
                     isKid ? "text-[var(--muted)]" : "text-white/75"
                   }`}
                 >
-                  {isKid ? "Student" : "lilvro"}
+                  {isKid ? "Student" : "Lil-Vro"}
                   {t.mode ? ` · ${t.mode.replace(/_/g, " ")}` : ""}
                 </p>
                 <p className="leading-relaxed">{t.content}</p>

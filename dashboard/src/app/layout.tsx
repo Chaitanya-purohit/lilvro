@@ -13,8 +13,13 @@ const sans = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "lilvro — Parent dashboard",
-  description: "See study sessions, mastery, and motivation for your child.",
+  title: "Lil-Vro — Parent dashboard",
+  description:
+    "See study sessions, mastery, and motivation while your child learns STEM by voice with Lil-Vro.",
+  icons: {
+    icon: [{ url: "/lilvro-icon.png", type: "image/png" }],
+    apple: [{ url: "/lilvro-icon.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

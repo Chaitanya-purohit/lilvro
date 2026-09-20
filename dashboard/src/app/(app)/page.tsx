@@ -18,7 +18,7 @@ export default async function OverviewPage() {
       <>
         <PageHeader
           eyebrow="Parent dashboard"
-          title="Welcome to lilvro"
+          title="Welcome to Lil-Vro"
           description="Add a child profile to start seeing study sessions, streaks, and mastery."
         />
         <EmptyState
@@ -161,7 +161,7 @@ export default async function OverviewPage() {
         </div>
         {weekSessions.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
-            No sessions in the last 7 days yet. When they study with lilvro, sessions show up here.
+            No sessions in the last 7 days yet. When they study with Lil-Vro, sessions show up here.
           </p>
         ) : (
           <ul className="divide-y divide-[var(--border)]">
