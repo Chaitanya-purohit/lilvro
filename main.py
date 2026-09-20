@@ -288,7 +288,7 @@ def on_transcript(text: str):
 
     # Voice-activated pause / resume
     lower = text.lower()
-    if any(p in lower for p in ["pause lilvro", "stop listening", "go to sleep"]):
+    if any(p in lower for p in ["pause learning", "stop listening", "go to sleep"]):
         if not _paused:
             _toggle_pause()
         return
@@ -400,7 +400,7 @@ def on_transcript(text: str):
 if __name__ == "__main__":
     print("lilvro — voice STEM agent")
     print("Mode: walkthrough  |  Say 'quiz mode' / 'teach back' / 'help me' to switch")
-    print("Pause: press p  or say 'pause lilvro' / 'resume'")
+    print("Pause: press p  or say 'pause learning' / 'resume'")
     print("End:   press b  or say 'bye' / 'I have to go'")
     print("I only answer after you finish speaking.")
     if store.enabled:
