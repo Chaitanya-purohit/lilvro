@@ -1,4 +1,5 @@
 import { AddChildForm } from "@/components/AddChildForm";
+import { DeleteChildButton } from "@/components/DeleteChildButton";
 import { PageHeader } from "@/components/ui";
 import { getChildren, getSelectedChild } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
@@ -58,6 +59,7 @@ export default async function ChildrenPage() {
                 {kid.id}
               </p>
             </div>
+            <DeleteChildButton childId={kid.id} childName={kid.display_name} />
           </li>
         ))}
       </ul>

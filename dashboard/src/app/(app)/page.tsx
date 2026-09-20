@@ -38,7 +38,9 @@ export default async function OverviewPage() {
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: stats }, { data: sessions }, { data: mastery }] = await Promise.all([
+  const weekOfStr = weekAgo.toISOString().slice(0, 10);
+
+  const [{ data: stats }, { data: sessions }, { data: mastery }, { data: weekStats }, { data: emergencyStops }] = await Promise.all([
     supabase.from("child_stats").select("*").eq("child_id", child.id).maybeSingle(),
     supabase
       .from("sessions")
@@ -52,6 +54,16 @@ export default async function OverviewPage() {
       .eq("child_id", child.id)
       .order("score", { ascending: false })
       .limit(5),
+    supabase
+      .from("session_stats")
+      .select("problems_solved, subjects, mood_counts, topics_needing_help")
+      .eq("child_id", child.id)
+      .gte("week_of", weekOfStr),
+    supabase
+      .from("emergency_stops")
+      .select("id")
+      .eq("child_id", child.id)
+      .gte("triggered_at", weekAgo.toISOString()),
   ]);
 
   const weekSessions = sessions ?? [];
@@ -59,6 +71,18 @@ export default async function OverviewPage() {
     weekSessions.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0) / 60,
   );
   const topTopic = mastery?.[0];
+
+  // Aggregate problems solved + subjects this week
+  const weekStatRows = weekStats ?? [];
+  const weekProblems = weekStatRows.reduce((sum, r) => sum + (r.problems_solved ?? 0), 0);
+  const weekSubjects: Record<string, number> = {};
+  for (const row of weekStatRows) {
+    for (const [subj, count] of Object.entries(row.subjects ?? {})) {
+      weekSubjects[subj] = (weekSubjects[subj] ?? 0) + (count as number);
+    }
+  }
+  const topSubject = Object.entries(weekSubjects).sort((a, b) => b[1] - a[1])[0];
+  const stopCount = (emergencyStops ?? []).length;
 
   return (
     <div className="space-y-6">
@@ -74,7 +98,7 @@ export default async function OverviewPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Current streak"
           value={`${stats?.current_streak_days ?? 0} days`}
@@ -88,14 +112,22 @@ export default async function OverviewPage() {
           delay={90}
         />
         <StatCard
+          label="Problems solved"
+          value={weekProblems}
+          hint={topSubject ? `Top subject: ${topSubject[0]} (${topSubject[1]})` : "Study time this week"}
+          delay={130}
+        />
+        <StatCard
           label="Study time"
           value={`${weekMinutes} min`}
           hint={
-            topTopic
+            stopCount > 0
+              ? `${stopCount} emergency stop${stopCount > 1 ? "s" : ""} this week`
+              : topTopic
               ? `Strongest: ${topTopic.topic} (${formatPct(topTopic.score)})`
               : "Mastery builds as they practice"
           }
-          delay={140}
+          delay={170}
         />
       </div>
 

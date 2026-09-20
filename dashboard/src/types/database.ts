@@ -77,6 +77,26 @@ type ChildStatsRow = {
   last_session_on: string | null;
 };
 
+type SessionStatsRow = {
+  id: string;
+  session_id: string;
+  child_id: string;
+  mood_counts: Record<string, number>;
+  problems_solved: number;
+  subjects: Record<string, number>;
+  topics_needing_help: Record<string, boolean>;
+  week_of: string;
+  created_at: string;
+};
+
+type EmergencyStopsRow = {
+  id: string;
+  child_id: string;
+  session_id: string | null;
+  transcript: string;
+  triggered_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -218,6 +238,34 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      session_stats: {
+        Row: SessionStatsRow;
+        Insert: {
+          id?: string;
+          session_id: string;
+          child_id: string;
+          mood_counts?: Record<string, number>;
+          problems_solved?: number;
+          subjects?: Record<string, number>;
+          topics_needing_help?: Record<string, boolean>;
+          week_of: string;
+          created_at?: string;
+        };
+        Update: Partial<SessionStatsRow>;
+        Relationships: [];
+      };
+      emergency_stops: {
+        Row: EmergencyStopsRow;
+        Insert: {
+          id?: string;
+          child_id: string;
+          session_id?: string | null;
+          transcript?: string;
+          triggered_at?: string;
+        };
+        Update: Partial<EmergencyStopsRow>;
+        Relationships: [];
       };
       child_stats: {
         Row: ChildStatsRow;

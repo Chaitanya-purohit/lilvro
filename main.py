@@ -12,6 +12,8 @@ not on interim text, fillers, or mid-sentence cuts.
 import os
 import sys
 import select
+import asyncio
+import json
 import threading
 import warnings
 import logging
@@ -51,6 +53,8 @@ load_dotenv()
 # ------------------------------------------------------------------ #
 #  Config
 # ------------------------------------------------------------------ #
+
+WS_PORT = int(os.getenv("WS_PORT", "8765"))  # WebSocket bridge port for child UI
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 DEEPGRAM_VOICE = os.getenv("DEEPGRAM_VOICE", "aura-2-thalia-en")
@@ -97,10 +101,72 @@ _speaking = False      # True while TTS audio is actively playing
 _speak_end_time = 0.0  # monotonic timestamp when last TTS finished
 _exiting = False       # Set to True by _end_session() to trigger clean shutdown
 
+# WebSocket bridge — child UI connects here for blob animation + emergency stop
+_ws_loop: asyncio.AbstractEventLoop | None = None
+_ws_clients: set = set()
+_ws_transcript: list[dict] = []  # running transcript [{role, content}]
+
 
 # ------------------------------------------------------------------ #
 #  Pause / resume — press P in terminal or say "pause" / "resume"
 # ------------------------------------------------------------------ #
+
+# ------------------------------------------------------------------ #
+#  WebSocket bridge — state signals for child blob UI
+# ------------------------------------------------------------------ #
+
+async def _ws_handler(websocket):
+    """Handle a single child browser connection."""
+    _ws_clients.add(websocket)
+    # Send current state so late-joining browser catches up
+    try:
+        await websocket.send(json.dumps({"type": "state", "value": "idle"}))
+        async for raw in websocket:
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("type") == "emergency_stop":
+                transcript_text = "\n".join(
+                    f"{t['role'].upper()}: {t['content']}" for t in _ws_transcript
+                )
+                store.record_emergency_stop(transcript_text)
+                print("\n  [EMERGENCY STOP triggered from child interface]")
+    except Exception:
+        pass
+    finally:
+        _ws_clients.discard(websocket)
+
+
+async def _ws_broadcast(msg: dict):
+    if _ws_clients:
+        data = json.dumps(msg)
+        await asyncio.gather(*[c.send(data) for c in set(_ws_clients)], return_exceptions=True)
+
+
+def ws_broadcast(msg: dict):
+    """Thread-safe broadcast from sync code (main voice loop)."""
+    if _ws_loop and not _ws_loop.is_closed():
+        asyncio.run_coroutine_threadsafe(_ws_broadcast(msg), _ws_loop)
+
+
+def _start_ws_server():
+    """Run the WebSocket server in its own thread + event loop."""
+    global _ws_loop
+    try:
+        import websockets
+    except ImportError:
+        print("  [WebSocket bridge disabled — pip install websockets to enable]")
+        return
+
+    async def _serve():
+        global _ws_loop
+        _ws_loop = asyncio.get_running_loop()
+        async with websockets.serve(_ws_handler, "0.0.0.0", WS_PORT):
+            await asyncio.Future()  # run forever
+
+    asyncio.run(_serve())
+
 
 _BYE_PHRASES = [
     "bye", "goodbye", "good bye", "see you", "see ya", "later",
@@ -135,6 +201,14 @@ def _end_session():
     )
     ding()
     speak(farewell)
+    store.record_session_stats(
+        mood_counts=dict(stats.mood_counts),
+        problems_solved=counter.total,
+        subjects=counter.by_subject,
+        topics_needing_help=[
+            s for s, n in counter.by_subject.items() if n == 0
+        ],
+    )
     store.end_session()
     raise SystemExit(0)
 
@@ -211,6 +285,7 @@ def speak(text: str):
     """
     global _speaking, _speak_end_time
     _speaking = True
+    ws_broadcast({"type": "state", "value": "agent_speaking"})
     try:
         response = requests.post(
             TTS_URL,
@@ -247,6 +322,7 @@ def speak(text: str):
                 pass
         _speaking = False
         _speak_end_time = time.monotonic()
+        ws_broadcast({"type": "state", "value": "idle"})
 
 
 # ------------------------------------------------------------------ #
@@ -337,6 +413,9 @@ def on_transcript(text: str):
     _last_spoken_user = final_text
     try:
         print(f"\r> {final_text}          ")
+        ws_broadcast({"type": "state", "value": "child_speaking"})
+        ws_broadcast({"type": "transcript", "role": "user", "content": final_text})
+        _ws_transcript.append({"role": "user", "content": final_text})
 
         new_mode = detect_mode(final_text, mode)
         if new_mode != mode:
@@ -376,6 +455,8 @@ def on_transcript(text: str):
             return
 
         print(f"\r< {speakable}          ")
+        ws_broadcast({"type": "transcript", "role": "assistant", "content": speakable})
+        _ws_transcript.append({"role": "assistant", "content": speakable})
 
         # Problem counter — check if agent just confirmed a correct answer
         solved_subject = counter.check_and_record(final_text, response_text)
@@ -410,6 +491,8 @@ if __name__ == "__main__":
     print("Press Ctrl+C to quit\n")
 
     threading.Thread(target=_keyboard_watcher, daemon=True).start()
+    threading.Thread(target=_start_ws_server, daemon=True, name="ws-bridge").start()
+    print(f"Child UI: ws://localhost:{WS_PORT}  (open dashboard/child page)")
 
     recorder = AudioToTextRecorder(
         model="tiny.en",
@@ -438,5 +521,13 @@ if __name__ == "__main__":
                   f"{summary['elapsed_min']} min, "
                   f"dominant mood: {summary['dominant_mood']} | "
                   f"problems solved: {psummary['total_solved']} ({subjects_str})")
+            store.record_session_stats(
+                mood_counts=dict(stats.mood_counts),
+                problems_solved=counter.total,
+                subjects=counter.by_subject,
+                topics_needing_help=[
+                    s for s, n in counter.by_subject.items() if n == 0
+                ],
+            )
             store.end_session()
         recorder.stop()

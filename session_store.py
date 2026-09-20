@@ -186,6 +186,47 @@ class SessionStore:
                 },
             )
 
+    def record_session_stats(
+        self,
+        *,
+        mood_counts: dict,
+        problems_solved: int,
+        subjects: dict,
+        topics_needing_help: list,
+    ) -> None:
+        """Write per-session statistics (mood, problems, subjects) to session_stats."""
+        if not self._enabled or not self.session_id:
+            return
+        from datetime import date
+        week_of = date.today().isoformat()
+        self._request(
+            "POST",
+            "session_stats",
+            json={
+                "session_id": self.session_id,
+                "child_id": self.child_id,
+                "mood_counts": mood_counts,
+                "problems_solved": problems_solved,
+                "subjects": subjects,
+                "topics_needing_help": {t: True for t in topics_needing_help},
+                "week_of": week_of,
+            },
+        )
+
+    def record_emergency_stop(self, transcript: str) -> None:
+        """Log an emergency stop with the full conversation transcript."""
+        if not self._enabled:
+            return
+        self._request(
+            "POST",
+            "emergency_stops",
+            json={
+                "child_id": self.child_id,
+                "session_id": self.session_id,
+                "transcript": transcript,
+            },
+        )
+
     def end_session(self) -> None:
         if not self._enabled or not self.session_id or not self._started_at:
             return
