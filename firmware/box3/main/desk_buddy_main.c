@@ -56,11 +56,18 @@ static EventGroupHandle_t s_audio_stream_event_group;
 static bool s_speaker_playing;
 static bool s_waiting_for_global_ip6;
 static lv_obj_t *s_face_eyes[2];
-static lv_obj_t *s_face_pupils[2];
+static lv_obj_t *s_face_highlights[2];
+static lv_obj_t *s_face_cheeks[2];
 static lv_obj_t *s_face_smile;
 static lv_obj_t *s_face_thinking_mouth;
 static lv_obj_t *s_face_talking_mouth;
 static bool s_face_initialized;
+static lv_timer_t *s_face_state_timer;
+static volatile face_state_t s_face_requested_state = FACE_LISTENING;
+static volatile bool s_face_state_pending;
+static const lv_point_precise_t s_face_smile_points[] = {
+    { 108, 148 }, { 128, 165 }, { 160, 172 }, { 192, 165 }, { 212, 148 },
+};
 
 static const char *wifi_disconnect_reason_name(uint8_t reason)
 {
@@ -382,9 +389,9 @@ static void face_stop_animations_locked(void)
 {
     for (size_t i = 0; i < 2; ++i) {
         lv_anim_delete(s_face_eyes[i], NULL);
-        lv_anim_delete(s_face_pupils[i], NULL);
+        lv_anim_delete(s_face_highlights[i], NULL);
         lv_obj_set_style_translate_x(s_face_eyes[i], 0, 0);
-        lv_obj_set_style_translate_x(s_face_pupils[i], 0, 0);
+        lv_obj_set_style_translate_x(s_face_highlights[i], 0, 0);
     }
     lv_anim_delete(s_face_talking_mouth, NULL);
 }
@@ -402,6 +409,10 @@ static void face_start_blink_locked(void)
         lv_anim_set_repeat_count(&blink, LV_ANIM_REPEAT_INFINITE);
         lv_anim_set_exec_cb(&blink, face_set_obj_height);
         lv_anim_start(&blink);
+
+        lv_anim_set_var(&blink, s_face_highlights[i]);
+        lv_anim_set_values(&blink, 16, 2);
+        lv_anim_start(&blink);
     }
 }
 
@@ -418,7 +429,7 @@ static void face_start_thinking_shift_locked(void)
         lv_anim_set_exec_cb(&shift, face_set_obj_translate_x);
         lv_anim_start(&shift);
 
-        lv_anim_set_var(&shift, s_face_pupils[i]);
+        lv_anim_set_var(&shift, s_face_highlights[i]);
         lv_anim_start(&shift);
     }
 }
@@ -447,9 +458,9 @@ static void desk_buddy_apply_face_locked(face_state_t state)
     int left_eye_x = -66;
     int right_eye_x = 66;
     int eye_y = -38;
-    int pupil_y = -38;
-    int pupil_left_x = -66;
-    int pupil_right_x = 66;
+    int highlight_y = -63;
+    int highlight_left_x = -78;
+    int highlight_right_x = 54;
 
     if (state == FACE_THINKING) {
         eye_width = 54;
@@ -457,21 +468,23 @@ static void desk_buddy_apply_face_locked(face_state_t state)
         left_eye_x = -54;
         right_eye_x = 78;
         eye_y = -52;
-        pupil_left_x = -46;
-        pupil_right_x = 86;
-        pupil_y = -66;
+        highlight_left_x = -66;
+        highlight_right_x = 66;
+        highlight_y = -78;
     } else if (state == FACE_TALKING) {
-        eye_width = 64;
-        eye_height = 16;
+        eye_width = 62;
+        eye_height = 72;
     }
 
     for (size_t i = 0; i < 2; ++i) {
         lv_obj_set_size(s_face_eyes[i], eye_width, eye_height);
         lv_obj_align(s_face_eyes[i], LV_ALIGN_CENTER, i == 0 ? left_eye_x : right_eye_x, eye_y);
-        lv_obj_set_size(s_face_pupils[i], 16, 30);
-        lv_obj_align(s_face_pupils[i], LV_ALIGN_CENTER,
-                     i == 0 ? pupil_left_x : pupil_right_x, pupil_y);
-        lv_obj_set_hidden(s_face_pupils[i], state == FACE_TALKING);
+        lv_obj_set_size(s_face_highlights[i], 16, 16);
+        lv_obj_align(s_face_highlights[i], LV_ALIGN_CENTER,
+                     i == 0 ? highlight_left_x : highlight_right_x, highlight_y);
+        lv_obj_set_hidden(s_face_highlights[i], false);
+        lv_obj_set_size(s_face_cheeks[i], 38, 18);
+        lv_obj_align(s_face_cheeks[i], LV_ALIGN_CENTER, i == 0 ? -104 : 104, 30);
     }
 
     if (state == FACE_LISTENING) {
@@ -497,15 +510,30 @@ static void desk_buddy_apply_face_locked(face_state_t state)
     }
 }
 
-static void desk_buddy_set_face(face_state_t state)
+/* This callback runs inside LVGL's display handler, which owns the LVGL port
+ * lock.  State requests originate in audio tasks and are applied here so a
+ * short display-lock timeout cannot drop a required expression change. */
+static void desk_buddy_face_timer_cb(lv_timer_t *timer)
 {
-    if (!s_face_initialized || !bsp_display_lock(1)) {
+    (void)timer;
+    if (!s_face_state_pending) {
         return;
     }
 
+    face_state_t state = s_face_requested_state;
+    s_face_state_pending = false;
     face_stop_animations_locked();
     desk_buddy_apply_face_locked(state);
-    bsp_display_unlock();
+}
+
+static void desk_buddy_set_face(face_state_t state)
+{
+    if (!s_face_initialized) {
+        return;
+    }
+
+    s_face_requested_state = state;
+    s_face_state_pending = true;
 }
 
 static void desk_buddy_face_init(void)
@@ -528,40 +556,48 @@ static void desk_buddy_face_init(void)
     for (size_t i = 0; i < 2; ++i) {
         s_face_eyes[i] = lv_obj_create(screen);
         lv_obj_set_style_radius(s_face_eyes[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(s_face_eyes[i], lv_color_white(), 0);
+        lv_obj_set_style_bg_color(s_face_eyes[i], lv_color_hex(0xF6C445), 0);
         lv_obj_set_style_border_width(s_face_eyes[i], 0, 0);
 
-        s_face_pupils[i] = lv_obj_create(screen);
-        lv_obj_set_style_radius(s_face_pupils[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(s_face_pupils[i], lv_color_black(), 0);
-        lv_obj_set_style_border_width(s_face_pupils[i], 0, 0);
+        s_face_highlights[i] = lv_obj_create(screen);
+        lv_obj_set_style_radius(s_face_highlights[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(s_face_highlights[i], lv_color_white(), 0);
+        lv_obj_set_style_border_width(s_face_highlights[i], 0, 0);
+
+        s_face_cheeks[i] = lv_obj_create(screen);
+        lv_obj_set_style_radius(s_face_cheeks[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(s_face_cheeks[i], lv_color_hex(0xA96868), 0);
+        lv_obj_set_style_bg_opa(s_face_cheeks[i], LV_OPA_70, 0);
+        lv_obj_set_style_border_width(s_face_cheeks[i], 0, 0);
     }
 
-    s_face_smile = lv_arc_create(screen);
-    lv_obj_set_size(s_face_smile, 156, 84);
-    lv_obj_align(s_face_smile, LV_ALIGN_CENTER, 0, 56);
-    lv_arc_set_angles(s_face_smile, 20, 160);
-    lv_obj_set_style_arc_opa(s_face_smile, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(s_face_smile, lv_color_white(), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(s_face_smile, 12, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_rounded(s_face_smile, true, LV_PART_INDICATOR);
+    s_face_smile = lv_line_create(screen);
+    lv_obj_set_size(s_face_smile, 320, 240);
+    lv_obj_align(s_face_smile, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_line_set_points(s_face_smile, s_face_smile_points,
+                       sizeof(s_face_smile_points) / sizeof(s_face_smile_points[0]));
+    lv_obj_set_style_line_color(s_face_smile, lv_color_hex(0xF6C445), 0);
+    lv_obj_set_style_line_width(s_face_smile, 12, 0);
+    lv_obj_set_style_line_rounded(s_face_smile, true, 0);
 
     s_face_thinking_mouth = lv_obj_create(screen);
     lv_obj_set_size(s_face_thinking_mouth, 42, 8);
     lv_obj_align(s_face_thinking_mouth, LV_ALIGN_CENTER, 8, 60);
     lv_obj_set_style_radius(s_face_thinking_mouth, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(s_face_thinking_mouth, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(s_face_thinking_mouth, lv_color_hex(0xF6C445), 0);
     lv_obj_set_style_border_width(s_face_thinking_mouth, 0, 0);
 
     s_face_talking_mouth = lv_obj_create(screen);
     lv_obj_set_size(s_face_talking_mouth, 72, 42);
     lv_obj_align(s_face_talking_mouth, LV_ALIGN_CENTER, 0, 54);
     lv_obj_set_style_radius(s_face_talking_mouth, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(s_face_talking_mouth, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(s_face_talking_mouth, lv_color_hex(0xF6C445), 0);
     lv_obj_set_style_border_width(s_face_talking_mouth, 0, 0);
 
     s_face_initialized = true;
     desk_buddy_apply_face_locked(FACE_LISTENING);
+    s_face_state_timer = lv_timer_create(desk_buddy_face_timer_cb, 20, NULL);
+    configASSERT(s_face_state_timer != NULL);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Desk Buddy face initialized");
 }
