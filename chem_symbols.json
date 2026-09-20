@@ -42,7 +42,7 @@
 
   "compounds": {
     "H₂O":   { "name": "water",               "aliases": ["water", "dihydrogen monoxide"], "tts": { "casual": "water",                      "normal": "H 2 O",                  "formula": "H 2 O" } },
-    "CO₂":   { "name": "carbon dioxide",       "aliases": ["carbon dioxide"],               "tts": { "casual": "C O 2",                       "normal": "carbon dioxide",          "formula": "C O 2" } },
+    "CO₂":   { "name": "carbon dioxide",       "aliases": ["carbon dioxide"],               "tts": { "casual": "carbon dioxide",              "normal": "carbon dioxide",          "formula": "C O 2" } },
     "CO":    { "name": "carbon monoxide",      "aliases": ["carbon monoxide"],              "tts": { "casual": "C O",                         "normal": "carbon monoxide",         "formula": "C O" } },
     "O₂":    { "name": "oxygen gas",           "aliases": ["oxygen gas", "dioxygen"],       "tts": { "casual": "O 2",                         "normal": "oxygen gas",              "formula": "O 2" } },
     "N₂":    { "name": "nitrogen gas",         "aliases": ["nitrogen gas", "dinitrogen"],   "tts": { "casual": "N 2",                         "normal": "nitrogen gas",            "formula": "N 2" } },
@@ -52,7 +52,7 @@
     "CH₄":   { "name": "methane",              "aliases": ["methane", "natural gas"],       "tts": { "casual": "methane",                     "normal": "C H 4",                   "formula": "C H 4" } },
     "C₂H₅OH":{ "name": "ethanol",             "aliases": ["ethanol", "alcohol"],           "tts": { "casual": "ethanol",                     "normal": "C 2 H 5 O H",             "formula": "C 2 H 5 O H" } },
     "C₆H₁₂O₆":{ "name": "glucose",            "aliases": ["glucose", "blood sugar"],       "tts": { "casual": "glucose",                     "normal": "C 6 H 12 O 6",            "formula": "C 6 H 12 O 6" } },
-    "NaCl":  { "name": "sodium chloride",      "aliases": ["salt", "table salt", "sodium chloride"], "tts": { "casual": "salt",               "normal": "sodium chloride",         "formula": "Na Cl" } },
+    "NaCl":  { "name": "sodium chloride",      "aliases": ["salt", "table salt", "sodium chloride"], "tts": { "casual": "sodium chloride",    "normal": "sodium chloride",         "formula": "Na Cl" } },
     "NaOH":  { "name": "sodium hydroxide",     "aliases": ["sodium hydroxide", "lye"],      "tts": { "casual": "sodium hydroxide",            "normal": "Na O H",                  "formula": "Na O H" } },
     "KOH":   { "name": "potassium hydroxide",  "aliases": ["potassium hydroxide"],          "tts": { "casual": "potassium hydroxide",         "normal": "K O H",                   "formula": "K O H" } },
     "CaCO₃": { "name": "calcium carbonate",    "aliases": ["calcium carbonate", "limestone","chalk"], "tts": { "casual": "calcium carbonate", "normal": "calcium carbonate",       "formula": "Ca C O 3" } },
@@ -66,7 +66,7 @@
     "SO₃":   { "name": "sulfur trioxide",      "aliases": ["sulfur trioxide"],              "tts": { "casual": "S O 3",                       "normal": "sulfur trioxide",          "formula": "S O 3" } },
     "NO":    { "name": "nitric oxide",         "aliases": ["nitric oxide"],                 "tts": { "casual": "N O",                         "normal": "nitric oxide",            "formula": "N O" } },
     "NO₂":   { "name": "nitrogen dioxide",     "aliases": ["nitrogen dioxide"],             "tts": { "casual": "N O 2",                       "normal": "nitrogen dioxide",         "formula": "N O 2" } },
-    "Fe₂O₃": { "name": "iron oxide",           "aliases": ["iron oxide", "rust"],           "tts": { "casual": "rust",                        "normal": "Fe 2 O 3",                "formula": "Fe 2 O 3" } },
+    "Fe₂O₃": { "name": "iron oxide",           "aliases": ["iron oxide", "rust"],           "tts": { "casual": "iron oxide",                  "normal": "iron oxide",              "formula": "Fe 2 O 3" } },
     "MgO":   { "name": "magnesium oxide",      "aliases": ["magnesium oxide"],              "tts": { "casual": "Mg O",                        "normal": "magnesium oxide",         "formula": "Mg O" } },
     "ZnO":   { "name": "zinc oxide",           "aliases": ["zinc oxide"],                   "tts": { "casual": "zinc oxide",                  "normal": "Zn O",                    "formula": "Zn O" } }
   },
@@ -80,7 +80,7 @@
     },
     "⇌": {
       "name": "equilibrium",
-      "aliases": ["equilibrium", "reversible", "in equilibrium with"],
+      "aliases": ["in equilibrium with", "equilibrium", "reversible", "in equilibrium"],
       "tts": { "casual": "is in equilibrium with", "normal": "is in equilibrium with", "pedagogical": "reversibly reacts to form" },
       "domain": "chemistry"
     },
@@ -98,7 +98,7 @@
     },
     "↑": {
       "name": "gas_evolved",
-      "aliases": ["gas", "evolved", "gas evolved"],
+      "aliases": ["evolved", "gas evolved"],
       "tts": { "casual": "gas", "normal": "gas evolved", "pedagogical": "which escapes as a gas" },
       "domain": "chemistry"
     },
