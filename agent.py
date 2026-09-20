@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 RESPONSES_URL = "https://api.openai.com/v1/chat/completions"
-DEFAULT_MODEL = "gpt-4o"
+DEFAULT_MODEL = "gpt-5.6-luna"
 HISTORY_LIMIT = 20  # max messages kept (10 turns) — prevents unbounded context growth
 
 # Distress phrases intercepted locally — never sent to external LLM
