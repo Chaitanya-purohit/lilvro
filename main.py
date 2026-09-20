@@ -11,6 +11,7 @@ not on interim text, fillers, or mid-sentence cuts.
 
 import os
 import sys
+import select
 import threading
 import warnings
 import logging
@@ -91,20 +92,29 @@ def _keyboard_watcher():
             elif ch == "\x03":
                 return
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
+    # Open /dev/tty directly so we don't compete with RealtimeSTT's stdin handling.
     try:
-        tty.setcbreak(fd)
+        tty_fd = open("/dev/tty", "rb", buffering=0)
+    except OSError:
+        return  # no controlling terminal — skip keyboard watcher silently
+
+    old = termios.tcgetattr(tty_fd)
+    try:
+        tty.setcbreak(tty_fd)
         while True:
-            ch = sys.stdin.read(1)
-            if ch.lower() == "p":
-                _toggle_pause()
-            elif ch == "\x03":  # Ctrl+C forwarded to main thread via KeyboardInterrupt
-                raise KeyboardInterrupt
+            # Non-blocking poll — returns immediately if no key pressed
+            ready, _, _ = select.select([tty_fd], [], [], 0.05)
+            if ready:
+                ch = tty_fd.read(1).decode("utf-8", errors="ignore")
+                if ch.lower() == "p":
+                    _toggle_pause()
+                elif ch == "\x03":
+                    raise KeyboardInterrupt
     except Exception:
         pass
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old)
+        tty_fd.close()
 
 
 #  TTS — Deepgram Aura
