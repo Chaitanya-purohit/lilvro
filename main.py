@@ -41,6 +41,9 @@ from agent import respond, detect_mode
 from utterance_gate import GateDecision, UtteranceGate
 from speech_styler import style_speech
 from session_store import SessionStore
+from chem_normalizer import normalize as chem_normalize, render as chem_render
+from content_filter import filter_response
+from mood_tracker import SessionStats
 
 load_dotenv()
 
@@ -79,6 +82,7 @@ ECHO_CANCEL_COOLDOWN = 1.2  # seconds to ignore mic input after TTS finishes
 history = []
 mode = "walkthrough"
 _paused = False
+stats = SessionStats()
 gate = UtteranceGate(
     settle_seconds=0.5,
     min_chars=2,
@@ -290,12 +294,19 @@ def on_transcript(text: str):
             mode = new_mode
             print(f"  [switched to {mode} mode]")
 
-        normalized = normalize(final_text)
+        # Update mood tracker — feeds into agent's teaching tone
+        turn_mood = stats.update(final_text)
+        current_mood = stats.current_mood
+        if turn_mood != "neutral":
+            print(f"  [mood: {turn_mood} | session: {current_mood}]")
+
+        # Normalize: spoken math + spoken chemistry → canonical notation for LLM
+        normalized = chem_normalize(normalize(final_text))
 
         # Think quietly — do not speak until the full reply exists.
         print("  (thinking)", end="", flush=True)
         try:
-            response_text, history = respond(normalized, history, mode=mode)
+            response_text, history = respond(normalized, history, mode=mode, mood=current_mood)
         except Exception as e:
             print(f"\r  [agent error: {e}]")
             return
@@ -304,7 +315,13 @@ def on_transcript(text: str):
             print("\r  [empty agent reply — staying quiet]")
             return
 
-        speakable = style_speech(render_math(response_text)).strip()
+        # Content guardrails — block age-inappropriate output before it reaches TTS
+        response_text, was_blocked = filter_response(response_text)
+        if was_blocked:
+            print("  [content filter triggered]")
+
+        # Render: math notation + chemistry notation → speakable English
+        speakable = style_speech(chem_render(render_math(response_text))).strip()
         if not speakable:
             print("\r  [nothing to speak]")
             return
@@ -352,6 +369,9 @@ if __name__ == "__main__":
             # recorder.text blocks until a silence-delimited utterance.
             recorder.text(on_transcript)
     except KeyboardInterrupt:
-        print("\nGoodbye!")
+        summary = stats.summary()
+        print(f"\nGoodbye!  Session: {summary['utterances']} turns, "
+              f"{summary['elapsed_min']} min, "
+              f"dominant mood: {summary['dominant_mood']}")
         store.end_session()
         recorder.stop()
