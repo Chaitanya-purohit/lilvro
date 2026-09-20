@@ -202,7 +202,7 @@ def respond(
 
     reply = _extract_output_text(response.json())
     if not reply.strip():
-        raise AgentError("Codex returned empty text — not speaking yet.")
+        raise AgentError("OpenAI returned empty text — not speaking yet.")
     history.append({"role": "assistant", "content": reply})
     return reply, history
 
