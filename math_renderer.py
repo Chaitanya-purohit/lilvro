@@ -65,6 +65,27 @@ def _replace_ascii_operators(text: str) -> str:
 	return text
 
 
+_SUPERSCRIPT_MAP = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+
+def _normalize_superscripts(text: str) -> str:
+	"""Convert Unicode superscript digits (e.g. 5²) to caret notation (5^2)."""
+	result = []
+	i = 0
+	while i < len(text):
+		ch = text[i]
+		if ch in "⁰¹²³⁴⁵⁶⁷⁸⁹":
+			# Collect consecutive superscript digits
+			sup = ""
+			while i < len(text) and text[i] in "⁰¹²³⁴⁵⁶⁷⁸⁹":
+				sup += text[i].translate(_SUPERSCRIPT_MAP)
+				i += 1
+			result.append(f"^{sup}")
+		else:
+			result.append(ch)
+			i += 1
+	return "".join(result)
+
+
 def _replace_structured_notation(text: str) -> str:
 	text = re.sub(
 		r"d\^\s*2\s*([A-Za-z])\s*/\s*d([A-Za-z])\^\s*2",
@@ -118,6 +139,7 @@ def render_math(text: str) -> str:
 	rendered = _replace_ascii_operators(rendered)
 	rendered = _replace_symbols(rendered)
 	rendered = _replace_matrices(rendered)
+	rendered = _normalize_superscripts(rendered)
 	rendered = _replace_structured_notation(rendered)
 	return _clean_for_speech(rendered)
 
