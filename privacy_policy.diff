@@ -1,0 +1,206 @@
+--- terms_and_conditions.md	2026-09-19 20:24:42
++++ privacy_policy.md	2026-09-19 20:25:06
+@@ -1,4 +1,4 @@
+-# Terms and Conditions
++# Privacy Policy
+ 
+ **lilvro — Voice STEM Learning Companion**
+ **Effective Date:** September 19, 2026
+@@ -6,123 +6,132 @@
+ 
+ ---
+ 
+-## 1. Acceptance of Terms
++## 1. Overview
+ 
+-By activating or using lilvro ("the App"), you ("Parent" or "Guardian") agree to these Terms and Conditions on behalf of yourself and the minor child ("Student") using the App. If you do not agree, do not use the App.
++lilvro ("we," "our," or "the App") is committed to protecting the privacy of children. This Privacy Policy explains what information lilvro collects, how it is used, and the rights parents and guardians have under applicable law — including the **Children's Online Privacy Protection Act (COPPA)**, the **California Consumer Privacy Act (CCPA)**, and the **EU General Data Protection Regulation (GDPR)** where applicable.
+ 
+-lilvro is intended for students aged 8 to 14. Use by children under 8 or unsupervised use by children under 13 is not permitted without express parental consent in accordance with the Children's Online Privacy Protection Act (COPPA).
++lilvro is a voice-only STEM learning companion for students aged 8–14. There is no screen, no user account, and no persistent profile.
+ 
+ ---
+ 
+-## 2. Description of Service
++## 2. Information We Collect
+ 
+-lilvro is a voice-only STEM learning companion. It operates as follows:
++### 2.1 Information We Do NOT Collect
+ 
+-- The Student speaks into a microphone.
+-- Speech is transcribed locally using on-device models (faster-whisper).
+-- The transcript is sent to a third-party language model (OpenRouter) to generate an educational response.
+-- The response is converted to speech via Deepgram's text-to-speech API and played aloud.
++- Full name, email address, phone number, or physical address
++- Persistent user identifiers or cookies
++- Voice audio recordings (audio is processed locally and never transmitted)
++- Payment or financial information
++- Location data
+ 
+-There is no screen, no visual interface, and no persistent user account required to use the core service.
++### 2.2 Information Processed During a Session
+ 
+----
++| Data | How It Is Processed | Stored by Us? |
++|---|---|---|
++| Voice audio | Transcribed on-device using faster-whisper (open source). Audio never leaves the device. | No |
++| Text transcript of student speech | Sent over HTTPS to OpenRouter's API to generate an educational response. | No — session only |
++| LLM response text | Sent over HTTPS to Deepgram's API for text-to-speech synthesis. | No — session only |
++| Conversation history | Held in local memory for multi-turn context within a single session. Cleared when the session ends. | No |
+ 
+-## 3. Eligibility and Parental Consent
++We do not log, store, sell, or share any session data beyond what is required to operate the real-time pipeline described above.
+ 
+-3.1 lilvro is designed for children aged 8–14. A parent or legal guardian must review and accept these Terms before a child uses the App.
++---
+ 
+-3.2 For children under 13, use constitutes the parent's or guardian's verifiable consent under COPPA. Parents may withdraw consent at any time by discontinuing use and requesting deletion of any stored data (see Section 6).
++## 3. Children's Privacy (COPPA)
+ 
+-3.3 You represent that you are at least 18 years old and have the legal authority to enter into this agreement on behalf of the Student.
++lilvro is directed to children under 13 and is designed in full compliance with COPPA.
+ 
+----
++3.1 **Parental consent is required** before a child under 13 uses the App. By allowing your child to use lilvro, you provide verifiable parental consent.
+ 
+-## 4. Acceptable Use
++3.2 We do not collect personal information from children beyond what is strictly necessary for the educational session to function.
+ 
+-The Student may use lilvro to:
+-- Ask questions about STEM subjects (mathematics, science, technology, engineering).
+-- Practice problem-solving through guided walkthroughs, teach-back sessions, and quizzes.
+-- Explore concepts in a conversational, voice-first format.
++3.3 **Parental rights under COPPA:**
++- **Review:** You may request a description of the type of information collected from your child.
++- **Delete:** You may request deletion of any information by contacting us at privacy@lilvro.app.
++- **Withdraw consent:** You may withdraw consent at any time by discontinuing use. No account deletion is necessary since no account is created.
+ 
+-The Student may not use lilvro to:
+-- Share personal identifying information (full name, address, phone number, school name) via voice.
+-- Attempt to elicit harmful, explicit, or age-inappropriate content.
+-- Use the App for any purpose other than educational engagement.
++3.4 We do not condition a child's participation on the disclosure of more personal information than is reasonably necessary.
+ 
+-We reserve the right to update the content safety filters at any time to better protect young users.
+-
+ ---
+ 
+-## 5. Intellectual Property
++## 4. How We Use Information
+ 
+-5.1 All software, prompts, math normalization logic, and associated materials are the intellectual property of the lilvro team.
++The text transcript is used solely to:
++- Generate an age-appropriate, educationally guided response via OpenRouter.
++- Convert that response to speech via Deepgram.
+ 
+-5.2 Transcripts and voice queries submitted during a session are used solely to generate responses and are not claimed as our intellectual property.
++We do not use any session content for:
++- Advertising or marketing
++- Profiling or behavioral tracking
++- Training our own AI models
++- Sharing with third parties beyond the two processors named above
+ 
+-5.3 You may not reverse-engineer, copy, or redistribute any part of the App without written permission.
+-
+ ---
+ 
+-## 6. Data and Privacy
++## 5. Third-Party Data Processors
+ 
+-lilvro collects and processes the following during a session:
++lilvro relies on two external services to function. These processors receive the minimum data necessary:
+ 
+-| Data Type | Purpose | Retained? |
+-|---|---|---|
+-| Voice audio | Transcribed locally; not transmitted | No |
+-| Text transcript | Sent to OpenRouter for LLM response | Session only |
+-| TTS response text | Sent to Deepgram for audio synthesis | Session only |
++### 5.1 OpenRouter (openrouter.ai)
++- **Data sent:** Text transcript of student query + system prompt
++- **Purpose:** Generate an educational LLM response
++- **Retention:** Per OpenRouter's data retention policy (see openrouter.ai/privacy)
++- **Note:** We use the `openrouter/free` tier; queries may be routed to various underlying model providers
+ 
+-We do not maintain user accounts, persistent profiles, or long-term conversation histories. See our Privacy Policy for full details.
++### 5.2 Deepgram (deepgram.com)
++- **Data sent:** Text of the LLM response to be spoken aloud
++- **Purpose:** Convert text to speech audio
++- **Retention:** Per Deepgram's data retention policy (see deepgram.com/privacy)
+ 
++We have no control over the internal data practices of these processors once data is transmitted. We encourage parents to review their privacy policies.
++
+ ---
+ 
+-## 7. Third-Party Services
++## 6. Data Security
+ 
+-lilvro integrates the following third-party services:
++- Voice audio never leaves the device.
++- All API calls to OpenRouter and Deepgram are made over HTTPS with API key authentication.
++- API keys are stored in environment variables and never exposed in the codebase or to the student.
++- No database, cloud storage, or logging infrastructure is used by lilvro itself.
+ 
+-- **OpenRouter** (openrouter.ai) — Language model inference. Governed by OpenRouter's Terms of Service and Privacy Policy.
+-- **Deepgram** (deepgram.com) — Text-to-speech synthesis. Governed by Deepgram's Terms of Service and Privacy Policy.
+-
+-We are not responsible for the data practices of these third parties. We encourage parents to review their policies.
+-
+ ---
+ 
+-## 8. Disclaimers
++## 7. Data Retention
+ 
+-8.1 lilvro is an educational tool, not a substitute for qualified teachers, tutors, or academic institutions.
++lilvro retains no data. Conversation history exists only in the local process memory and is cleared when the session ends (Ctrl+C or process termination).
+ 
+-8.2 The App is provided "as is" without warranty of any kind. We do not guarantee accuracy of all generated responses.
+-
+-8.3 We are not liable for any educational outcomes, decisions made based on App content, or technical interruptions.
+-
+ ---
+ 
+-## 9. Limitation of Liability
++## 8. Your Rights
+ 
+-To the fullest extent permitted by law, lilvro and its developers shall not be liable for any indirect, incidental, or consequential damages arising from use or inability to use the App.
++Depending on your jurisdiction, you may have the right to:
+ 
+----
++- **Access** information we hold about your child (we hold none persistently)
++- **Delete** any data (no account or profile exists to delete)
++- **Object** to processing (discontinue use at any time)
++- **Portability** (no stored data to export)
+ 
+-## 10. Modifications
++For GDPR users: our legal basis for processing is **legitimate interest** in providing the requested educational service, and for children under 13 in the EU, **parental consent**.
+ 
+-We may update these Terms at any time. Continued use after changes constitutes acceptance of the revised Terms. Material changes affecting children's data will be communicated to parents directly where contact information is available.
++For CCPA users: we do not sell personal information.
+ 
+ ---
+ 
+-## 11. Governing Law
++## 9. Changes to This Policy
+ 
+-These Terms are governed by the laws of the Commonwealth of Massachusetts, United States, without regard to conflict of law principles.
++We may update this Privacy Policy to reflect changes in our practices or legal requirements. We will post the updated policy in the project repository. For material changes affecting children's data, we will make reasonable efforts to notify parents.
+ 
+ ---
+ 
+-## 12. Contact
++## 10. Contact
+ 
+-For questions, parental data requests, or consent withdrawal:
++For privacy questions, parental data requests, COPPA consent withdrawal, or GDPR/CCPA requests:
+ 
+-**Email:** legal@lilvro.app
+-**Project Repository:** https://github.com/Chaitanya-purohit/lilvro
++**Privacy contact:** privacy@lilvro.app
++**Project repository:** https://github.com/Chaitanya-purohit/lilvro
+ 
++We will respond to verifiable parental requests within 30 days.
++
+ ---
+ 
+-*lilvro — learning that sounds like a conversation.*
++*lilvro collects the minimum necessary to teach. Nothing more.*
