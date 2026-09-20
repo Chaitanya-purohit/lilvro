@@ -10,6 +10,20 @@ load_dotenv()
 
 RESPONSES_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/free"
+HISTORY_LIMIT = 20  # max messages kept (10 turns) — prevents unbounded context growth
+
+# Distress phrases intercepted locally — never sent to external LLM
+_DISTRESS_PHRASES = [
+    "want to disappear", "want to die", "kill myself", "hurt myself",
+    "hate myself", "want to give up on life", "nobody cares about me",
+    "can't do anything right", "i'm worthless", "i want to end it",
+]
+_DISTRESS_RESPONSE = (
+    "Hey, I heard something that made me stop. You matter a lot, and if "
+    "you're having a hard time right now, please talk to a trusted adult — "
+    "a parent, teacher, or school counselor. I'm just a study buddy and "
+    "I really want you to be okay."
+)
 
 _BASE_SYSTEM = """
 You are a friendly STEM study partner for children ages 8 to 14.
@@ -121,12 +135,24 @@ def respond(
     if lowered in {"um", "uh", "erm", "hmm", "hm", "ah", "oh", "mm", "mmm"}:
         raise ValueError("utterance is filler only — keep listening")
 
+    # Distress detection — intercept locally, never forward to external LLM
+    lower_text = normalized_text.lower()
+    if any(phrase in lower_text for phrase in _DISTRESS_PHRASES):
+        history = list(history or [])
+        history.append({"role": "user", "content": normalized_text})
+        history.append({"role": "assistant", "content": _DISTRESS_RESPONSE})
+        return _DISTRESS_RESPONSE, history
+
     api_key = api_key or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise AgentError("OPENROUTER_API_KEY is not set.")
 
     history = list(history or [])
     history.append({"role": "user", "content": normalized_text})
+
+    # Cap history to prevent unbounded context growth and cost
+    if len(history) > HISTORY_LIMIT:
+        history = history[-HISTORY_LIMIT:]
 
     # Prepend system message to conversation history
     messages = [{"role": "system", "content": _build_system(mode, mood)}] + [

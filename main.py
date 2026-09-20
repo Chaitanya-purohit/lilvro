@@ -116,13 +116,16 @@ def speak(text: str):
         response.raise_for_status()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp = f.name
+        try:
             with wave.open(tmp, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(24000)
                 wf.writeframes(response.content)
-        subprocess.run(["afplay", tmp], check=True)
-        os.unlink(tmp)
+            subprocess.run(["afplay", tmp], check=True)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
     except Exception as e:
         print(f"  [TTS error: {e}]")
 
