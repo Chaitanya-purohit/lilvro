@@ -192,7 +192,10 @@ def respond(
         response.raise_for_status()
     except requests.HTTPError as exc:
         try:
-            detail = response.json().get("error", {}).get("message")
+            payload = response.json()
+            if isinstance(payload, list):
+                payload = payload[0] if payload else {}
+            detail = payload.get("error", {}).get("message")
         except (ValueError, AttributeError):
             detail = None
         raise AgentError(detail or f"Google request failed ({response.status_code}).") from exc
