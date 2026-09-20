@@ -98,6 +98,13 @@ def _keyboard_watcher():
 #  TTS — Deepgram Aura (afplay avoids CoreAudio conflict with the mic)
 # ------------------------------------------------------------------ #
 
+_DING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds", "ding.mp3")
+
+def ding():
+    """Play a short chime to signal lilvro is about to speak."""
+    subprocess.run(["afplay", _DING], check=False)
+
+
 def speak(text: str):
     """Send text to Deepgram Aura TTS and play audio through speaker.
 
@@ -116,13 +123,16 @@ def speak(text: str):
         response.raise_for_status()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp = f.name
+        try:
             with wave.open(tmp, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(24000)
                 wf.writeframes(response.content)
-        subprocess.run(["afplay", tmp], check=True)
-        os.unlink(tmp)
+            subprocess.run(["afplay", tmp], check=True)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
     except Exception as e:
         print(f"  [TTS error: {e}]")
 
@@ -227,6 +237,7 @@ def on_transcript(text: str):
             return
 
         print(f"\r< {speakable}          ")
+        ding()
         speak(speakable)
     finally:
         _busy = False
