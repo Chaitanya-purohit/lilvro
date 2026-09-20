@@ -279,9 +279,12 @@ def render(text: str, mode: str = "normal") -> str:
         spoken = _render_formula_token(body, mode)
         return f" {coeff} {spoken} ".strip() if coeff else f" {spoken} "
 
+    # Only match tokens that contain at least one subscript/superscript Unicode character.
+    # This prevents mangling normal English words like "Let", "First", "What"
+    # which are capitalized but are NOT chemical formulas.
     t = re.sub(
-        r"(\d*)"                              # optional leading coefficient
-        r"([A-Z][a-zA-Z₀-₉⁰-⁹⁺⁻]*)",        # element(s) with sub/superscripts
+        r"(\d*)"                                         # optional leading coefficient
+        r"([A-Z][a-zA-Z]*[₀-₉⁰-⁹⁺⁻][a-zA-Z₀-₉⁰-⁹⁺⁻]*)",  # must contain sub/superscript
         _render_remaining,
         t,
     )
