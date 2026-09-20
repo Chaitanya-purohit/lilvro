@@ -38,6 +38,7 @@ from speech_normalizer import normalize
 from math_renderer import render_math
 from agent import respond, detect_mode
 from utterance_gate import GateDecision, UtteranceGate
+from speech_styler import style_speech
 
 load_dotenv()
 
@@ -258,7 +259,7 @@ def on_transcript(text: str):
             print("\r  [empty agent reply — staying quiet]")
             return
 
-        speakable = render_math(response_text).strip()
+        speakable = style_speech(render_math(response_text)).strip()
         if not speakable:
             print("\r  [nothing to speak]")
             return
