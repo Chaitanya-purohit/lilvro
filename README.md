@@ -30,6 +30,7 @@ It also solves a problem most voice assistants ignore: **speaking math out loud*
 - **Answer verification.** Built to never confirm a wrong answer as correct, and to admit uncertainty instead of making things up.
 - **Kid-safety layer.** Age-appropriate content filtering on every reply, and off-topic questions get steered back to STEM.
 - **Real hardware.** A prototype on an **ESP32-S3-BOX-3** streams the child's voice to Lil-Vro and plays the reply back, so it works as a standalone talking device.
+- **Low-power Bluetooth interface.** A **Nordic nRF54LM20 DK** is the low-power interface for the screen-free companion. It sends events over **Bluetooth Low Energy** to a laptop gateway, and the gateway calls our AI and text-to-speech APIs.
 - **Parent dashboard.** A Next.js + Supabase web app showing streaks, topics covered, per-topic mastery, and session history.
 
 ---
@@ -51,6 +52,15 @@ Mic (laptop)                              ESP32-S3-BOX-3 (Wi-Fi)
                                  └─ session_store → Supabase → parent dashboard
 ```
 
+The low-power path runs alongside it:
+
+```
+Nordic nRF54LM20 DK                       Laptop gateway
+ └─ events over Bluetooth Low Energy  →    └─ calls the AI API
+                                           └─ calls the text-to-speech API
+                                               └─ spoken reply
+```
+
 Tool and mode routing (motivation, mental-health support, advising, entertainment, teach-back, mistake mode) uses fast local rules, so switching feels instant and needs no extra model call.
 
 | Layer | Tech |
@@ -58,7 +68,8 @@ Tool and mode routing (motivation, mental-health support, advising, entertainmen
 | Speech-to-text | RealtimeSTT with faster-whisper (`tiny.en`) locally; Deepgram streaming for the BOX-3 |
 | LLM | OpenAI chat completions (default `gpt-4o`, override with `CODEX_MODEL`) |
 | Text-to-speech | Deepgram Aura (laptop); OpenAI TTS (BOX-3) |
-| Hardware | ESP32-S3-BOX-3 |
+| Hardware | ESP32-S3-BOX-3 (voice streaming and face display); Nordic nRF54LM20 DK (low-power interface) |
+| Wireless link | Wi-Fi for the BOX-3; Bluetooth Low Energy from the nRF54LM20 DK to a laptop gateway |
 | Database | Supabase (Postgres, Auth, migrations) |
 | Parent dashboard | Next.js (Vercel-ready) |
 
@@ -132,9 +143,13 @@ CODEX_MODEL=gpt-4o              # any OpenAI chat model ID
 
 ---
 
-## Hardware: ESP32-S3-BOX-3
+## Hardware: ESP32-S3-BOX-3 and Nordic nRF54LM20 DK
 
-Lil-Vro is meant to live on a dedicated, distraction-free device. The prototype uses an **ESP32-S3-BOX-3**: the device captures 16 kHz mono audio and streams it over Wi-Fi to a server on the same network. That server (`box3_audio_server.py`) transcribes it with Deepgram, runs it through the same normalizer and agent as the laptop version, generates the spoken reply, and sends the audio back to the device to play.
+Lil-Vro is meant to live on a dedicated, distraction-free device, and we built two hardware paths to get there.
+
+### ESP32-S3-BOX-3: the voice device
+
+The prototype uses an **ESP32-S3-BOX-3**: the device captures 16 kHz mono audio and streams it over Wi-Fi to a server on the same network. That server (`box3_audio_server.py`) transcribes it with Deepgram, runs it through the same normalizer and agent as the laptop version, generates the spoken reply, and sends the audio back to the device to play.
 
 ```bash
 # on the laptop, connected to the same Wi-Fi as the BOX-3
@@ -142,6 +157,23 @@ python box3_audio_server.py          # listens on port 8787 by default
 ```
 
 > The BOX-3 transport currently lives on the `socrates-bot` branch and has not been merged into `main` yet.
+
+### Nordic nRF54LM20 DK: the low-power interface
+
+The **Nordic Semiconductor nRF54LM20 DK** is the low-power interface for our screen-free companion. It is deliberately kept thin: the board doesn't run speech recognition or a language model, and it never talks to the cloud itself. It only sends **events over Bluetooth Low Energy (BLE)** to a **laptop gateway**.
+
+The gateway is where the heavy work happens. It receives each event, **calls our AI API** to work out the reply, and **calls our text-to-speech API** to turn that reply into speech.
+
+```
+nRF54LM20 DK  ──(BLE events)──▶  laptop gateway  ──▶  AI API  ──▶  text-to-speech API  ──▶  spoken reply
+```
+
+Why we split it this way:
+
+- **Low power on the device.** BLE lets the board stay a small, efficient interface instead of a Wi-Fi and compute-heavy one.
+- **Smart gateway.** The laptop handles the AI and text-to-speech calls, so the board never needs to know how any of that works.
+- **Screen-free by design.** The companion stays a simple physical object for the child while the intelligence runs behind it.
+- **Swappable brain.** Because the board only sends events, we can change the AI or voice behind the gateway without touching the device.
 
 ---
 
@@ -214,6 +246,7 @@ On the `socrates-bot` branch: `box3_audio_server.py` (BOX-3 audio transport) and
 
 - On the laptop, speech recognition runs **locally**; raw audio isn't sent to a third party.
 - On the **BOX-3** path, the child's audio is streamed to **Deepgram** for transcription.
+- On the **nRF54LM20 DK** path, the board sends events over Bluetooth Low Energy to the laptop gateway, and the gateway sends requests to the AI and text-to-speech APIs.
 - Transcribed text is sent to **OpenAI** for replies, and reply text goes to a text-to-speech service (Deepgram or OpenAI) for voice.
 - Lil-Vro is designed not to ask for names, locations, schools, or other identifying information.
 - Draft [Terms & Conditions](terms_and_conditions.md) and [Privacy Policy](privacy_policy.md) are included.
@@ -227,6 +260,7 @@ On the `socrates-bot` branch: `box3_audio_server.py` (BOX-3 audio transport) and
 - Conversation history is in memory unless Supabase is configured.
 - The LLM defaults to `gpt-4o`, which costs money per request. Set `CODEX_MODEL` to a cheaper model if needed.
 - The BOX-3 prototype needs a laptop on the same Wi-Fi to do the processing; it doesn't run standalone yet.
+- The nRF54LM20 DK path also needs a laptop: the board only sends events over BLE, and the laptop gateway makes the AI and text-to-speech calls.
 
 ---
 
@@ -249,6 +283,7 @@ On the `socrates-bot` branch: `box3_audio_server.py` (BOX-3 audio transport) and
 - Mood-adaptive teaching that requires zero manual input — the agent detects frustration and adjusts automatically
 - All safety features (distress detection, content filter) intercept locally before any external API call
 - A working ESP32-S3-BOX-3 hardware prototype that makes Lil-Vro a standalone device
+- A second hardware path: a Nordic nRF54LM20 DK that acts as a low-power BLE interface and hands off to a laptop gateway that calls the AI and text-to-speech APIs
 
 ---
 
@@ -279,4 +314,4 @@ On the `socrates-bot` branch: `box3_audio_server.py` (BOX-3 audio transport) and
 | **Chai** | The core voice pipeline and agent, the spoken-math and chemistry normalizers, local speech-to-text, and the project's legal docs. | Python, JSON lexicons, regular expressions, prompt engineering, audio processing, technical writing. | Spoken math and chemistry, noise filtering, echo cancellation, natural-sounding speech, mood tracker, content filter, answer-verification guardrails. |
 | **Kyle** | The math-to-speech renderer, kid-safety guardrails, mood detection, and an OpenAI adapter for classifying messages. | Python, OpenAI API, Deepgram text-to-speech, text parsing, unit testing, cross-platform audio. | Equations spoken as natural English, safe age-appropriate replies, mood-based tone, Deepgram voice, Windows playback. |
 | **Andy** | The Supabase database, session storage, the Next.js parent dashboard, the utterance gate, and the agent's shared structure. | TypeScript, SQL, Python, React and Next.js, Tailwind CSS, Supabase (Postgres, Auth, row-level security), database design. | Saved sessions and streaks, mastery and activity views, parent login, turn-taking that waits for the child to finish, barge-in and bookmarks. |
-| **Sam** | The ESP32-S3-BOX-3 hardware voice transport, the teach-back prompt, Nodric development kit for laptop gateway, and the first live microphone transcription. | Python (asyncio), WebSockets and TCP sockets, raw PCM audio, Deepgram and OpenAI APIs, embedded hardware. | Live voice streaming from the device over Wi-Fi, speech-to-text, spoken replies played on the device, teach-back mode. |
+| **Sam** | The ESP32-S3-BOX-3 hardware voice transport, the teach-back prompt, the Nordic nRF54LM20 DK low-power interface with its laptop gateway, and the first live microphone transcription. | Python (asyncio), WebSockets and TCP sockets, raw PCM audio, Bluetooth Low Energy, Deepgram and OpenAI APIs, embedded hardware. | Live voice streaming from the device over Wi-Fi, BLE events from the DK to a laptop gateway, speech-to-text, spoken replies played on the device, teach-back mode. |
