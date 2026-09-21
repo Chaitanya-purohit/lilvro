@@ -47,6 +47,10 @@ from chem_normalizer import normalize as chem_normalize, render as chem_render
 from content_filter import filter_response
 from mood_tracker import SessionStats
 from problem_counter import ProblemCounter
+from ble_controller import (
+    BLEController,
+    LED_IDLE, LED_LISTENING, LED_THINKING, LED_SPEAKING, LED_PAUSED,
+)
 
 load_dotenv()
 
@@ -100,6 +104,9 @@ _last_spoken_user = ""
 _speaking = False      # True while TTS audio is actively playing
 _speak_end_time = 0.0  # monotonic timestamp when last TTS finished
 _exiting = False       # Set to True by _end_session() to trigger clean shutdown
+
+# BLE controller for nRF54LM20 DK — may be None if board not found
+_ble: BLEController | None = None
 
 # WebSocket bridge — child UI connects here for blob animation + emergency stop
 _ws_loop: asyncio.AbstractEventLoop | None = None
@@ -218,6 +225,8 @@ def _toggle_pause():
     _paused = not _paused
     status = "PAUSED  (press p or say 'resume' to continue)" if _paused else "RESUMED"
     print(f"\n  [{status}]          ")
+    if _ble:
+        _ble.set_led(LED_PAUSED if _paused else LED_IDLE)
 
 
 def _keyboard_watcher():
@@ -286,6 +295,8 @@ def speak(text: str):
     global _speaking, _speak_end_time
     _speaking = True
     ws_broadcast({"type": "state", "value": "agent_speaking"})
+    if _ble:
+        _ble.set_led(LED_SPEAKING)
     try:
         response = requests.post(
             TTS_URL,
@@ -323,6 +334,8 @@ def speak(text: str):
         _speaking = False
         _speak_end_time = time.monotonic()
         ws_broadcast({"type": "state", "value": "idle"})
+        if _ble:
+            _ble.set_led(LED_IDLE)
 
 
 # ------------------------------------------------------------------ #
@@ -414,6 +427,8 @@ def on_transcript(text: str):
     try:
         print(f"\r> {final_text}          ")
         ws_broadcast({"type": "state", "value": "child_speaking"})
+        if _ble:
+            _ble.set_led(LED_LISTENING)
         ws_broadcast({"type": "transcript", "role": "user", "content": final_text})
         _ws_transcript.append({"role": "user", "content": final_text})
 
@@ -433,6 +448,8 @@ def on_transcript(text: str):
 
         # Think quietly — do not speak until the full reply exists.
         print("  (thinking)", end="", flush=True)
+        if _ble:
+            _ble.set_led(LED_THINKING)
         try:
             response_text, history = respond(normalized, history, mode=mode, mood=current_mood)
         except Exception as e:
@@ -492,6 +509,10 @@ if __name__ == "__main__":
 
     threading.Thread(target=_keyboard_watcher, daemon=True).start()
     threading.Thread(target=_start_ws_server, daemon=True, name="ws-bridge").start()
+
+    global _ble
+    _ble = BLEController(on_press=_toggle_pause, on_release=lambda: None)
+    threading.Thread(target=_ble.start, daemon=True, name="ble-nrf54lm20").start()
     print(f"Child UI: ws://localhost:{WS_PORT}  (open dashboard/child page)")
 
     recorder = AudioToTextRecorder(
